@@ -76,3 +76,38 @@ describe("understand", () => {
     }
   });
 });
+
+describe("harmonic multi-resolution", () => {
+  let hroot: string;
+  let hstore: GraphStore;
+  let hsem: SemanticEngine;
+  beforeAll(async () => {
+    hroot = mkdtempSync(join(tmpdir(), "veridex-harm-"));
+    writeFileSync(join(hroot, "auth.ts"), [
+      "export function login(username: string) {",
+      "  const ok = validateCredentials(username);",
+      "  return ok ? createSession(username) : null;",
+      "}",
+      "function validateCredentials(u: string){ return u.length > 0 }",
+      "function createSession(u: string){ return { user: u } }",
+    ].join("\n"));
+    hstore = GraphStore.open(":memory:");
+    await new Indexer(hstore).indexAll(hroot);
+    hsem = SemanticEngine.build(hstore);
+  });
+  afterAll(() => { hstore.close(); rmSync(hroot, { recursive: true, force: true }); });
+
+  it("emits MAP, SIGNATURES and DETAIL tiers within budget", () => {
+    const r = understand(hstore, hsem, "user login", { root: hroot, tokenBudget: 2000 });
+    expect(r.text).toContain("# MAP");
+    expect(r.text).toContain("# SIGNATURES");
+    expect(r.text).toContain("# DETAIL");
+    expect(r.text.toLowerCase()).toContain("login");
+    expect(r.tokensEstimate).toBeLessThanOrEqual(2000);
+  });
+
+  it("flat mode omits the tiers (back-compat)", () => {
+    const r = understand(hstore, hsem, "user login", { root: hroot, resolution: "flat" });
+    expect(r.text).not.toContain("# MAP");
+  });
+});

@@ -6,6 +6,7 @@ import { extractSpine } from "./spine.js";
 import { rankNodes } from "./rank.js";
 import { estimateTokens, positionOrder } from "./budget.js";
 import { renderFact, type RenderedFact } from "./render.js";
+import { buildHarmonic, type Balance } from "./harmonic.js";
 
 export interface UnderstandOpts {
   root: string;
@@ -14,6 +15,9 @@ export interface UnderstandOpts {
   depth?: number;
   maxNodes?: number;
   fullCount?: number;
+  /** "harmonic" (default): MAP→SIGNATURES→DETAIL tiers. "flat": detail only. */
+  resolution?: "harmonic" | "flat";
+  balance?: Balance;
 }
 
 export interface UnderstandResult {
@@ -61,6 +65,15 @@ export function understand(
     fileCache.set(path, src);
     return src;
   };
+
+  // Harmonic multi-resolution memory (default): MAP → SIGNATURES → DETAIL.
+  if ((opts.resolution ?? "harmonic") === "harmonic") {
+    const header = [`# Veridex slice for: ${task}`, LEGEND, ""].join("\n");
+    const inner = Math.max(200, tokenBudget - estimateTokens(header) - 30); // reserve fixed overhead
+    const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance });
+    const text = [header, h.text].join("\n");
+    return { text, facts: h.facts, tokensEstimate: estimateTokens(text), anchors };
+  }
 
   // Greedy budgeted selection (best-first). Top `fullCount` get full source; rest skeleton.
   const selected: RenderedFact[] = [];
