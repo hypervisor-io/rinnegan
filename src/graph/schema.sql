@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS files (
   node_ids TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS imports (
+  file         TEXT NOT NULL,
+  local_name   TEXT NOT NULL,
+  imported_name TEXT NOT NULL,
+  module_spec  TEXT NOT NULL,
+  line         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file);
+
 -- FTS5 over pre-tokenized text (camelCase/snake already split into words),
 -- so BM25 ranking sees identifier sub-tokens. `id` is carried UNINDEXED.
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id UNINDEXED, tokens);

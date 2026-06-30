@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { GraphNode, GraphEdge, EdgeKind } from "../core/types.js";
+import type { ImportRef } from "../parse/extract.js";
 
 const SCHEMA = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
 
@@ -145,6 +146,40 @@ export class GraphStore {
       .map((r) => this.rowToEdge(r));
   }
 
+  // --- imports (for cross-file resolution) ---
+  setImports(file: string, refs: ImportRef[]): void {
+    this.db.prepare(`DELETE FROM imports WHERE file = ?`).run(file);
+    const ins = this.db.prepare(
+      `INSERT INTO imports (file,local_name,imported_name,module_spec,line) VALUES (?,?,?,?,?)`,
+    );
+    for (const r of refs) ins.run(file, r.localName, r.importedName, r.moduleSpec, r.line);
+  }
+
+  getImports(file: string): ImportRef[] {
+    const rows = this.db.prepare(`SELECT * FROM imports WHERE file = ?`).all(file) as {
+      local_name: string; imported_name: string; module_spec: string; line: number;
+    }[];
+    return rows.map((r) => ({ localName: r.local_name, importedName: r.imported_name, moduleSpec: r.module_spec, line: r.line }));
+  }
+
+  fileExists(path: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM files WHERE path = ?`).get(path);
+  }
+
+  /** Find an exported top-level symbol by name in a given file. */
+  findExportedNode(filePath: string, name: string): GraphNode | undefined {
+    const r = this.db.prepare(
+      `SELECT * FROM nodes WHERE file_path = ? AND is_exported = 1 AND qualified_name = ? LIMIT 1`,
+    ).get(filePath, name) as NodeRow | undefined;
+    return r ? this.rowToNode(r) : undefined;
+  }
+
+  deleteEdge(e: GraphEdge): void {
+    this.db.prepare(
+      `DELETE FROM edges WHERE source=? AND target=? AND kind=? AND line=? AND col=?`,
+    ).run(e.source, e.target, e.kind, e.line, e.col);
+  }
+
   getFileMeta(path: string): FileMeta | undefined {
     const r = this.db.prepare(`SELECT * FROM files WHERE path = ?`).get(path) as
       | { path: string; hash: string; mtime_ms: number; node_ids: string } | undefined;
@@ -168,6 +203,7 @@ export class GraphStore {
         this.db.prepare(`DELETE FROM edges WHERE source = ? OR target = ?`).run(id, id);
       }
       this.db.prepare(`DELETE FROM files WHERE path = ?`).run(path);
+      this.db.prepare(`DELETE FROM imports WHERE file = ?`).run(path);
     });
     del(meta.nodeIds);
   }

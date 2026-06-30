@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { GraphStore } from "../graph/store.js";
 import { scanFiles, contentHash } from "../ingest/scanner.js";
 import { parseFile } from "../parse/extract.js";
+import { resolveImports } from "../resolution/imports.js";
 
 export interface IndexStats {
   scanned: number;
@@ -50,10 +51,14 @@ export class Indexer {
       this.store.tx(() => {
         for (const n of res.nodes) this.store.insertNode(n);
         for (const e of res.edges) this.store.insertEdge(e);
+        this.store.setImports(f.path, res.imports);
       });
       this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id) });
       parsed++;
     }
+
+    // cross-file pass once all files are present
+    this.store.tx(() => resolveImports(this.store));
 
     const s = this.store.stats();
     return { scanned: files.length, parsed, skipped, nodes: s.nodes, edges: s.edges };

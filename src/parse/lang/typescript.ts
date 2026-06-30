@@ -1,7 +1,7 @@
 import ts from "typescript";
 import { nodeId } from "../../core/types.js";
 import type { GraphNode, GraphEdge, NodeKind, ReadWrite } from "../../core/types.js";
-import type { ParseResult } from "../extract.js";
+import type { ParseResult, ImportRef } from "../extract.js";
 
 interface Decl {
   id: string;
@@ -33,7 +33,25 @@ export function extractTypeScript(path: string, source: string, language: string
   const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const imports: ImportRef[] = [];
   let unresolved = 0;
+
+  function collectImport(n: ts.ImportDeclaration): void {
+    if (!ts.isStringLiteral(n.moduleSpecifier)) return;
+    const moduleSpec = n.moduleSpecifier.text;
+    const line = lineOf(n.getStart(sf));
+    const clause = n.importClause;
+    if (!clause) return;
+    if (clause.name) imports.push({ localName: clause.name.text, importedName: "default", moduleSpec, line });
+    const nb = clause.namedBindings;
+    if (nb && ts.isNamespaceImport(nb)) {
+      imports.push({ localName: nb.name.text, importedName: "*", moduleSpec, line });
+    } else if (nb && ts.isNamedImports(nb)) {
+      for (const el of nb.elements) {
+        imports.push({ localName: el.name.text, importedName: (el.propertyName ?? el.name).text, moduleSpec, line });
+      }
+    }
+  }
 
   const lineOf = (pos: number) => sf.getLineAndCharacterOfPosition(pos).line + 1;
   const colOf = (pos: number) => sf.getLineAndCharacterOfPosition(pos).character + 1;
@@ -86,6 +104,8 @@ export function extractTypeScript(path: string, source: string, language: string
   function visitA(n: ts.Node): void {
     let pushedName = false;
     let pushedScope = false;
+
+    if (ts.isImportDeclaration(n)) collectImport(n);
 
     const d = declInfoFor(n);
     if (d) {
@@ -237,5 +257,5 @@ export function extractTypeScript(path: string, source: string, language: string
   }
   visitB(sf);
 
-  return { nodes, edges, unresolved };
+  return { nodes, edges, unresolved, imports };
 }

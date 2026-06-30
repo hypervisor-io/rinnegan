@@ -1,10 +1,18 @@
 import type { GraphNode, GraphEdge } from "../core/types.js";
 import { extractTypeScript } from "./lang/typescript.js";
 
+export interface ImportRef {
+  localName: string;
+  importedName: string; // exported name in the target module ("default", "*", or the symbol)
+  moduleSpec: string;
+  line: number;
+}
+
 export interface ParseResult {
   nodes: GraphNode[];
   edges: GraphEdge[];
   unresolved: number;
+  imports: ImportRef[];
 }
 
 /**
@@ -22,6 +30,6 @@ export async function parseFile(
     case "javascript":
       return extractTypeScript(path, source, language);
     default:
-      return { nodes: [], edges: [], unresolved: 0 };
+      return { nodes: [], edges: [], unresolved: 0, imports: [] };
   }
 }
