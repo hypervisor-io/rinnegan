@@ -72,6 +72,33 @@ describe("extended grammars", () => {
   });
 });
 
+describe("elixir", () => {
+  const src = [
+    "defmodule Math do",
+    "  def add(a, b), do: a + b",
+    "  def run do",
+    "    add(1, 2)",
+    "    missing(3)",
+    "  end",
+    "end",
+  ].join("\n");
+  it("extracts module + def macros as definitions", async () => {
+    const r = await parseFile("math.ex", src, "elixir");
+    expect(r.nodes.some((n) => n.qualifiedName === "Math" && n.kind === "module")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName === "Math.add" && n.kind === "function")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName === "Math.run")).toBe(true);
+  });
+  it("resolves an in-file def call (ast_exact) and marks unknown calls unresolved", async () => {
+    const r = await parseFile("math.ex", src, "elixir");
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    expect(call).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === call!.target)?.qualifiedName).toBe("Math.add");
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "unresolved")).toBe(true);
+    // the signature `add(a, b)` must NOT become a self-call edge
+    expect(r.edges.filter((e) => e.kind === "calls" && e.provenance === "ast_exact").length).toBe(1);
+  });
+});
+
 describe("ocaml", () => {
   const src = "let add a b = a + b\nlet run () = add 1 2";
   it("extracts let-bindings and resolves an application (ast_exact)", async () => {

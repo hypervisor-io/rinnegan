@@ -29,6 +29,7 @@ const WASM: Record<string, string> = {
   bash: "tree-sitter-bash",
   ocaml: "tree-sitter-ocaml",
   rescript: "tree-sitter-rescript",
+  elixir: "tree-sitter-elixir",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -45,13 +46,19 @@ async function getParser(language: string): Promise<Parser> {
 }
 
 // Minimal structural typing over web-tree-sitter nodes (avoids depending on its types).
-interface TsNode {
+export interface TsNode {
   type: string;
   text: string;
   startPosition: { row: number; column: number };
   endPosition: { row: number; column: number };
   namedChildren: TsNode[];
   childForFieldName(field: string): TsNode | null;
+}
+
+/** Parse a source string and return the root node, for bespoke extractors. */
+export async function getTsTree(language: string, source: string): Promise<TsNode> {
+  const parser = await getParser(language);
+  return (parser.parse(source) as unknown as { rootNode: TsNode }).rootNode;
 }
 
 type NameStrategy = "field" | "firstIdent" | "declarator";

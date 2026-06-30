@@ -4,6 +4,7 @@ import { extractTreeSitter, SPECS } from "./treesitter.js";
 import { extractDocs } from "./special/docs.js";
 import { extractManifest } from "./special/manifests.js";
 import { extractMcp } from "./special/mcp_config.js";
+import { extractElixir } from "./special/elixir.js";
 
 export interface ImportRef {
   localName: string;
@@ -39,6 +40,8 @@ export async function parseFile(
       return extractManifest(path, source, language);
     case "mcp":
       return extractMcp(path, source, language);
+    case "elixir":
+      return extractElixir(path, source, language);
     default:
       if (SPECS[language]) return extractTreeSitter(path, source, language, SPECS[language]);
       return { nodes: [], edges: [], unresolved: 0, imports: [] };

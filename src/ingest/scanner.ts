@@ -16,6 +16,7 @@ export const LANG_EXT: Record<string, string> = {
   ".m": "objc", ".mm": "objc",
   ".sh": "bash", ".bash": "bash",
   ".ml": "ocaml", ".mli": "ocaml", ".res": "rescript", ".resi": "rescript",
+  ".ex": "elixir", ".exs": "elixir",
 };
 
 const IGNORE_DIRS = new Set([
