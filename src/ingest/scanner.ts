@@ -9,6 +9,10 @@ export const LANG_EXT: Record<string, string> = {
   ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".py": "python", ".go": "go",
   ".rs": "rust", ".java": "java", ".php": "php", ".cs": "c_sharp", ".rb": "ruby",
+  ".c": "c", ".h": "c",
+  ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
+  ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin", ".scala": "scala",
+  ".zig": "zig", ".lua": "lua", ".sol": "solidity",
 };
 
 const IGNORE_DIRS = new Set([

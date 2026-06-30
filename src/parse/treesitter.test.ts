@@ -49,3 +49,25 @@ describe("registry languages", () => {
     expect(r.nodes.some((n) => n.qualifiedName === "login")).toBe(true);
   });
 });
+
+describe("extended grammars", () => {
+  const cases: [string, string, string, string][] = [
+    ["a.c", "int login(char* u){ return validate(u); } int validate(char* u){ return 1; }", "c", "login"],
+    ["a.cpp", "class A { public: bool run(){ return go(); } bool go(){ return true; } };", "cpp", "run"],
+    ["a.swift", "func login(_ u: String) -> Bool { return validate(u) }\nfunc validate(_ u: String) -> Bool { true }", "swift", "login"],
+    ["a.kt", "fun login(u: String): Boolean { return validate(u) }\nfun validate(u: String) = true", "kotlin", "login"],
+    ["a.scala", "object M { def login(u: String): Boolean = validate(u); def validate(u: String): Boolean = true }", "scala", "login"],
+    ["a.zig", "fn login(u: []const u8) bool { return validate(u); }\nfn validate(u: []const u8) bool { return true; }", "zig", "login"],
+    ["a.sol", "contract C { function login() public returns (bool) { return validate(); } function validate() public returns (bool) { return true; } }", "solidity", "login"],
+  ];
+  for (const [file, src, lang, sym] of cases) {
+    it(`${lang}: extracts ${sym}`, async () => {
+      const r = await parseFile(file, src, lang);
+      expect(r.nodes.some((n) => n.qualifiedName.endsWith(sym))).toBe(true);
+    });
+  }
+  it("c resolves an in-file call (ast_exact)", async () => {
+    const r = await parseFile("a.c", "int login(char* u){ return validate(u); } int validate(char* u){ return 1; }", "c");
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
+  });
+});

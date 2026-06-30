@@ -17,6 +17,14 @@ const WASM: Record<string, string> = {
   php: "tree-sitter-php",
   c_sharp: "tree-sitter-c_sharp",
   ruby: "tree-sitter-ruby",
+  c: "tree-sitter-c",
+  cpp: "tree-sitter-cpp",
+  swift: "tree-sitter-swift",
+  kotlin: "tree-sitter-kotlin",
+  scala: "tree-sitter-scala",
+  zig: "tree-sitter-zig",
+  lua: "tree-sitter-lua",
+  solidity: "tree-sitter-solidity",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -42,14 +50,16 @@ interface TsNode {
   childForFieldName(field: string): TsNode | null;
 }
 
+type NameStrategy = "field" | "firstIdent" | "declarator";
 interface DefRule {
   type: string;
   kind: NodeKind;
   nameField?: string; // default "name"
+  nameStrategy?: NameStrategy; // default "field"
 }
 interface CallRule {
   type: string;
-  fnField: string;
+  fnField?: string;
 }
 export interface LangConfig {
   defs: DefRule[];
@@ -59,18 +69,37 @@ export interface LangConfig {
   selectorTypes: string[];
 }
 
+const NAMEISH = /^(identifier|simple_identifier|type_identifier|name|word)$/;
+
+/** Descend declarators (c/c++) to the first identifier/field_identifier. */
+function descendName(n: TsNode): TsNode | null {
+  const stack = [...n.namedChildren];
+  while (stack.length) {
+    const c = stack.shift()!;
+    if (c.type === "identifier" || c.type === "field_identifier") return c;
+    if (/declarator/.test(c.type)) stack.push(...c.namedChildren);
+  }
+  return null;
+}
+
 function defOf(cfg: LangConfig, n: TsNode): { kind: NodeKind; name: string } | null {
   for (const r of cfg.defs) {
-    if (n.type === r.type) {
-      const nameNode = n.childForFieldName(r.nameField ?? "name");
-      if (nameNode) return { kind: r.kind, name: nameNode.text };
-    }
+    if (n.type !== r.type) continue;
+    let nameNode: TsNode | null;
+    if (r.nameStrategy === "declarator") nameNode = descendName(n);
+    else if (r.nameStrategy === "firstIdent") nameNode = n.namedChildren.find((c) => NAMEISH.test(c.type)) ?? null;
+    else nameNode = n.childForFieldName(r.nameField ?? "name");
+    if (nameNode) return { kind: r.kind, name: nameNode.text };
   }
   return null;
 }
 function callFnOf(cfg: LangConfig, n: TsNode): TsNode | null {
   for (const r of cfg.calls) {
-    if (n.type === r.type) return n.childForFieldName(r.fnField);
+    if (n.type !== r.type) continue;
+    const byField = r.fnField ? n.childForFieldName(r.fnField) : null;
+    if (byField) return byField;
+    // fallback: first identifier-ish child (grammars without a function field, e.g. kotlin)
+    return n.namedChildren.find((c) => c.type === cfg.identType) ?? null;
   }
   return null;
 }
@@ -252,5 +281,76 @@ export const SPECS: Record<string, LangConfig> = {
     calls: [{ type: "call", fnField: "method" }],
     identType: "identifier",
     selectorTypes: ["scope_resolution"],
+  },
+  c: {
+    defs: [{ type: "function_definition", kind: "function", nameStrategy: "declarator" }],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["field_expression"],
+  },
+  cpp: {
+    defs: [
+      { type: "function_definition", kind: "function", nameStrategy: "declarator" },
+      { type: "class_specifier", kind: "class" },
+      { type: "struct_specifier", kind: "struct" },
+    ],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["field_expression"],
+  },
+  swift: {
+    defs: [
+      { type: "function_declaration", kind: "function" },
+      { type: "class_declaration", kind: "class" },
+      { type: "protocol_declaration", kind: "interface" },
+    ],
+    calls: [{ type: "call_expression" }],
+    identType: "simple_identifier",
+    selectorTypes: ["navigation_expression"],
+  },
+  kotlin: {
+    defs: [
+      { type: "function_declaration", kind: "function", nameStrategy: "firstIdent" },
+      { type: "class_declaration", kind: "class", nameStrategy: "firstIdent" },
+    ],
+    calls: [{ type: "call_expression" }],
+    identType: "simple_identifier",
+    selectorTypes: ["navigation_expression"],
+  },
+  scala: {
+    defs: [
+      { type: "function_definition", kind: "function" },
+      { type: "object_definition", kind: "module" },
+      { type: "class_definition", kind: "class" },
+      { type: "trait_definition", kind: "interface" },
+    ],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["field_expression"],
+  },
+  zig: {
+    defs: [{ type: "function_declaration", kind: "function" }],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["field_expression"],
+  },
+  lua: {
+    defs: [
+      { type: "function_definition_statement", kind: "function", nameStrategy: "firstIdent" },
+      { type: "function_definition", kind: "function", nameStrategy: "firstIdent" },
+    ],
+    calls: [{ type: "function_call", fnField: "name" }, { type: "call", fnField: "name" }],
+    identType: "identifier",
+    selectorTypes: ["dot_index_expression", "method_index_expression"],
+  },
+  solidity: {
+    defs: [
+      { type: "function_definition", kind: "function" },
+      { type: "contract_declaration", kind: "class" },
+      { type: "struct_declaration", kind: "struct" },
+    ],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["member_expression"],
   },
 };
