@@ -7,7 +7,7 @@ import { PROVENANCE_TRUST, type GraphNode, type NodeKind } from "../core/types.j
  */
 const KIND_WEIGHT: Record<NodeKind, number> = {
   function: 1, method: 1, class: 1, interface: 0.95, struct: 0.95,
-  type_alias: 0.8, enum: 0.8, enum_member: 0.4, module: 0.7, namespace: 0.7,
+  type_alias: 0.8, enum: 0.8, enum_member: 0.4, module: 0.7,
   constant: 0.5, property: 0.55, field: 0.55,
   variable: 0.3, export: 0.4, import: 0.1, unresolved: 0.25, file: 0,
 };
