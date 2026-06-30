@@ -267,7 +267,7 @@ it("svd is deterministic + sign-canonical", () => {
 
 **Interfaces:**
 - Consumes: `GraphStore`, semantic indices, source files.
-- Produces: `understand(store, semantic, task, opts)` → `{ text, facts, tokensEstimate }`. Pipeline: seed (fuse) → `extractSpine` (minimal connected subgraph over calls/deps/types, depth-bounded) → `rankNodes` (`centrality × relevance × provenanceConfidence × changeRecency`) → skeletonize off-spine to signatures → `budget` (cap tokens) → `positionOrder` (highest signal first+last, low in middle) → `render` (provenance tag + `file:line` + line-numbered source; dynamic dispatch ⇒ "static path ends here").
+- Produces: `understand(store, semantic, task, opts)` → `{ text, facts, tokensEstimate }`. Pipeline: seed (fuse) → `extractSpine` (minimal connected subgraph over calls/deps/types, depth-bounded) → `rankNodes` (`centrality × relevance × provenanceConfidence × changeRecency`) → skeletonize off-spine to signatures → `budget` (cap tokens) → `positionOrder` (highest signal first+last, low in middle) → `render` (provenance tag + `file:line` + line-numbered source; dynamic dispatch ⇒ "static path ends here"). Render applies **whitespace minimization**: `minifyBlock(lines, startLine)` uniform-dedents the block, elides pure-blank lines (signalled by line-number gaps), and trims trailing whitespace — zero information loss because line numbers are explicit.
 
 - [ ] **Step 1: Write failing tests** — (a) `rankNodes` ranks an `ast_exact`-connected, query-relevant node above an `unresolved`, irrelevant one; (b) `understand` output contains the anchor symbol's `file:line` and stays under the token budget; (c) every rendered fact line carries a provenance tag.
 - [ ] **Step 2:** Run tests. Expected: FAIL.

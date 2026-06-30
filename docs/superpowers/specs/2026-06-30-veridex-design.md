@@ -180,6 +180,18 @@ Pipeline for `understand(task)`:
    line-numbered verbatim source (Read-equivalent, so the agent cites and edits
    without a separate read). Dynamic-dispatch sites render an explicit
    "static path ends here" marker instead of a guessed edge.
+8. **Whitespace minimization (literal-noise removal).** Because every emitted line
+   carries an *explicit* line number, redundant whitespace can be deleted with zero
+   information loss:
+   - **Uniform dedent** — strip the common leading indentation of each emitted block
+     (indentation is the largest whitespace-token sink; line numbers are preserved so
+     `file:line` citations remain exact).
+   - **Blank-line elision via line-number gaps** — omit pure-blank lines; a jump in the
+     printed line numbers (e.g. `10 → 13`) unambiguously signals the gap.
+   - **Trailing-whitespace trim.**
+   This is the "signal not noise" principle applied to literal characters. It stacks on
+   top of minimal-spine selection: repomix dumps whole files *with* whitespace; Veridex
+   emits the minimal spine *without* redundant whitespace.
 
 **Secondary queries** (library + CLI + hidden MCP tools): `search`, `node`,
 `callers`, `callees`, `impact`, `deps` (file-scoped dependency query — fixes #500),
