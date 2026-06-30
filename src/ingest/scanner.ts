@@ -8,6 +8,7 @@ export const LANG_EXT: Record<string, string> = {
   ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
   ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
   ".py": "python", ".go": "go",
+  ".rs": "rust", ".java": "java", ".php": "php", ".cs": "c_sharp", ".rb": "ruby",
 };
 
 const IGNORE_DIRS = new Set([

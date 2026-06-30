@@ -12,6 +12,11 @@ const langCache = new Map<string, unknown>();
 const WASM: Record<string, string> = {
   python: "tree-sitter-python",
   go: "tree-sitter-go",
+  rust: "tree-sitter-rust",
+  java: "tree-sitter-java",
+  php: "tree-sitter-php",
+  c_sharp: "tree-sitter-c_sharp",
+  ruby: "tree-sitter-ruby",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -37,14 +42,37 @@ interface TsNode {
   childForFieldName(field: string): TsNode | null;
 }
 
+interface DefRule {
+  type: string;
+  kind: NodeKind;
+  nameField?: string; // default "name"
+}
+interface CallRule {
+  type: string;
+  fnField: string;
+}
 export interface LangConfig {
-  /** Map a node to a definition {kind, name} or null. */
-  def(n: TsNode): { kind: NodeKind; name: string } | null;
-  callType: string;
-  callFnField: string;
+  defs: DefRule[];
+  calls: CallRule[];
   identType: string;
   /** node types that represent a member/qualified call (a.b()) → dynamic boundary */
   selectorTypes: string[];
+}
+
+function defOf(cfg: LangConfig, n: TsNode): { kind: NodeKind; name: string } | null {
+  for (const r of cfg.defs) {
+    if (n.type === r.type) {
+      const nameNode = n.childForFieldName(r.nameField ?? "name");
+      if (nameNode) return { kind: r.kind, name: nameNode.text };
+    }
+  }
+  return null;
+}
+function callFnOf(cfg: LangConfig, n: TsNode): TsNode | null {
+  for (const r of cfg.calls) {
+    if (n.type === r.type) return n.childForFieldName(r.fnField);
+  }
+  return null;
 }
 
 function firstLine(text: string): string {
@@ -77,7 +105,7 @@ export async function extractTreeSitter(
   function walkDefs(n: TsNode, nameStack: string[], ownerId: string): void {
     let owner = ownerId;
     let stack = nameStack;
-    const d = cfg.def(n);
+    const d = defOf(cfg, n);
     if (d) {
       const fqn = [...nameStack, d.name].join(".");
       const id = nodeId(path, fqn);
@@ -121,8 +149,8 @@ export async function extractTreeSitter(
   // Pass B: calls
   function walkCalls(n: TsNode, ownerId: string): void {
     const owner = defNodeId.get(n) ?? ownerId;
-    if (n.type === cfg.callType) {
-      const fn = n.childForFieldName(cfg.callFnField);
+    const fn = callFnOf(cfg, n);
+    if (fn) {
       const line = n.startPosition.row + 1;
       const col = n.startPosition.column + 1;
       if (fn && fn.type === cfg.identType) {
@@ -146,42 +174,83 @@ export async function extractTreeSitter(
   return { nodes, edges, unresolved, imports: [] };
 }
 
-export const PYTHON_CONFIG: LangConfig = {
-  def(n) {
-    if (n.type === "function_definition") {
-      const name = n.childForFieldName("name");
-      return name ? { kind: "function", name: name.text } : null;
-    }
-    if (n.type === "class_definition") {
-      const name = n.childForFieldName("name");
-      return name ? { kind: "class", name: name.text } : null;
-    }
-    return null;
+/**
+ * Per-language tree-sitter specs. Adding a grammar from tree-sitter-wasms is a
+ * table entry — node/field names verified against the actual grammar, not assumed.
+ */
+export const SPECS: Record<string, LangConfig> = {
+  python: {
+    defs: [
+      { type: "function_definition", kind: "function" },
+      { type: "class_definition", kind: "class" },
+    ],
+    calls: [{ type: "call", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["attribute"],
   },
-  callType: "call",
-  callFnField: "function",
-  identType: "identifier",
-  selectorTypes: ["attribute"],
-};
-
-export const GO_CONFIG: LangConfig = {
-  def(n) {
-    if (n.type === "function_declaration") {
-      const name = n.childForFieldName("name");
-      return name ? { kind: "function", name: name.text } : null;
-    }
-    if (n.type === "method_declaration") {
-      const name = n.childForFieldName("name");
-      return name ? { kind: "method", name: name.text } : null;
-    }
-    if (n.type === "type_spec") {
-      const name = n.childForFieldName("name");
-      return name ? { kind: "struct", name: name.text } : null;
-    }
-    return null;
+  go: {
+    defs: [
+      { type: "function_declaration", kind: "function" },
+      { type: "method_declaration", kind: "method" },
+      { type: "type_spec", kind: "struct" },
+    ],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["selector_expression"],
   },
-  callType: "call_expression",
-  callFnField: "function",
-  identType: "identifier",
-  selectorTypes: ["selector_expression"],
+  rust: {
+    defs: [
+      { type: "function_item", kind: "function" },
+      { type: "struct_item", kind: "struct" },
+      { type: "enum_item", kind: "enum" },
+      { type: "trait_item", kind: "interface" },
+    ],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["field_expression", "scoped_identifier"],
+  },
+  java: {
+    defs: [
+      { type: "method_declaration", kind: "method" },
+      { type: "class_declaration", kind: "class" },
+      { type: "interface_declaration", kind: "interface" },
+    ],
+    calls: [{ type: "method_invocation", fnField: "name" }],
+    identType: "identifier",
+    selectorTypes: ["field_access"],
+  },
+  php: {
+    defs: [
+      { type: "function_definition", kind: "function" },
+      { type: "method_declaration", kind: "method" },
+      { type: "class_declaration", kind: "class" },
+    ],
+    calls: [
+      { type: "function_call_expression", fnField: "function" },
+      { type: "member_call_expression", fnField: "name" },
+    ],
+    identType: "name",
+    selectorTypes: ["member_access_expression"],
+  },
+  c_sharp: {
+    defs: [
+      { type: "method_declaration", kind: "method" },
+      { type: "class_declaration", kind: "class" },
+      { type: "interface_declaration", kind: "interface" },
+      { type: "struct_declaration", kind: "struct" },
+    ],
+    calls: [{ type: "invocation_expression", fnField: "function" }],
+    identType: "identifier",
+    selectorTypes: ["member_access_expression"],
+  },
+  ruby: {
+    defs: [
+      { type: "method", kind: "method" },
+      { type: "class", kind: "class" },
+      { type: "module", kind: "module" },
+    ],
+    calls: [{ type: "call", fnField: "method" }],
+    identType: "identifier",
+    selectorTypes: ["scope_resolution"],
+  },
 };

@@ -32,3 +32,20 @@ describe("tree-sitter extractors", () => {
     expect(target?.qualifiedName).toBe("validate");
   });
 });
+
+describe("registry languages", () => {
+  it("Rust: resolves in-file function call", async () => {
+    const r = await parseFile("a.rs", "fn login(u: &str) -> bool { validate(u) }\nfn validate(u: &str) -> bool { true }", "rust");
+    expect(r.nodes.some((n) => n.qualifiedName === "login" && n.kind === "function")).toBe(true);
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
+  });
+  it("Java: resolves in-file method call", async () => {
+    const r = await parseFile("A.java", "class A { boolean login(String u){ return validate(u); } boolean validate(String u){ return true; } }", "java");
+    expect(r.nodes.some((n) => n.qualifiedName.endsWith("validate"))).toBe(true);
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
+  });
+  it("Ruby: extracts methods", async () => {
+    const r = await parseFile("a.rb", "def login(u)\n validate(u)\nend\ndef validate(u)\n true\nend", "ruby");
+    expect(r.nodes.some((n) => n.qualifiedName === "login")).toBe(true);
+  });
+});
