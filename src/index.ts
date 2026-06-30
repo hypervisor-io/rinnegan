@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { GraphStore } from "./graph/store.js";
 import { Indexer, type IndexStats } from "./index/indexer.js";
 import { SemanticEngine } from "./semantic/engine.js";
+import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
 import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
@@ -42,6 +43,25 @@ export class Veridex {
 
   understand(task: string, opts: Partial<UnderstandOpts> = {}): UnderstandResult {
     return understand(this.store, this.sem(), task, { root: this.root, ...opts });
+  }
+
+  /** Re-index a single file (after an external edit) and invalidate the semantic cache. */
+  async reindexFile(relPath: string): Promise<"reindexed" | "removed" | "skipped"> {
+    const r = await new Indexer(this.store).reindexPath(this.root, relPath);
+    if (r !== "skipped") this.semantic = null;
+    return r;
+  }
+
+  /** Start a live file watcher that keeps the index in sync. Returns the watcher. */
+  watch(onChange?: (e: WatchEvent) => void): Watcher {
+    const w = new Watcher(this.store, this.root, {
+      onChange,
+      onSemanticInvalidate: () => {
+        this.semantic = null;
+      },
+    });
+    w.start();
+    return w;
   }
 
   search(query: string, limit = 20): GraphNode[] {

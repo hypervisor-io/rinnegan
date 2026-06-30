@@ -1,7 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, statSync, existsSync } from "node:fs";
+import { join, extname } from "node:path";
 import { GraphStore } from "../graph/store.js";
-import { scanFiles, contentHash } from "../ingest/scanner.js";
+import { scanFiles, contentHash, LANG_EXT, type ScannedFile } from "../ingest/scanner.js";
 import { parseFile } from "../parse/extract.js";
 import { resolveImports } from "../resolution/imports.js";
 
@@ -24,43 +24,54 @@ export class Indexer {
     const files = scanFiles(root);
     let parsed = 0;
     let skipped = 0;
-
     for (const f of files) {
-      const abs = join(root, f.path);
-      const st = statSync(abs);
-      const meta = this.store.getFileMeta(f.path);
-
-      // Gate 1: same mtime and already indexed → skip without reading.
-      if (meta && meta.mtimeMs === st.mtimeMs) {
-        skipped++;
-        continue;
-      }
-
-      const content = readFileSync(abs, "utf8");
-      const hash = contentHash(content);
-
-      // Gate 2: content hash unchanged → refresh mtime only, skip reparse.
-      if (meta && meta.hash === hash) {
-        this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds });
-        skipped++;
-        continue;
-      }
-
-      if (meta) this.store.removeFile(f.path);
-      const res = await parseFile(f.path, content, f.language);
-      this.store.tx(() => {
-        for (const n of res.nodes) this.store.insertNode(n);
-        for (const e of res.edges) this.store.insertEdge(e);
-        this.store.setImports(f.path, res.imports);
-      });
-      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id) });
-      parsed++;
+      if (await this.indexOne(root, f)) parsed++;
+      else skipped++;
     }
-
     // cross-file pass once all files are present
     this.store.tx(() => resolveImports(this.store));
-
     const s = this.store.stats();
     return { scanned: files.length, parsed, skipped, nodes: s.nodes, edges: s.edges };
+  }
+
+  /** Index one file with two-gate change detection. Returns true if (re)parsed. */
+  private async indexOne(root: string, f: ScannedFile): Promise<boolean> {
+    const abs = join(root, f.path);
+    const st = statSync(abs);
+    const meta = this.store.getFileMeta(f.path);
+
+    if (meta && meta.mtimeMs === st.mtimeMs) return false; // gate 1
+    const content = readFileSync(abs, "utf8");
+    const hash = contentHash(content);
+    if (meta && meta.hash === hash) {
+      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds });
+      return false; // gate 2
+    }
+
+    if (meta) this.store.removeFile(f.path);
+    const res = await parseFile(f.path, content, f.language);
+    this.store.tx(() => {
+      for (const n of res.nodes) this.store.insertNode(n);
+      for (const e of res.edges) this.store.insertEdge(e);
+      this.store.setImports(f.path, res.imports);
+    });
+    this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id) });
+    return true;
+  }
+
+  /** Re-index a single file (or remove it if gone), then refresh cross-file edges. */
+  async reindexPath(root: string, relPath: string): Promise<"reindexed" | "removed" | "skipped"> {
+    const language = LANG_EXT[extname(relPath).toLowerCase()];
+    if (!language) return "skipped";
+    const abs = join(root, relPath);
+    if (!existsSync(abs)) {
+      this.store.removeFile(relPath);
+      this.store.tx(() => resolveImports(this.store));
+      return "removed";
+    }
+    const st = statSync(abs);
+    const changed = await this.indexOne(root, { path: relPath, size: st.size, language });
+    this.store.tx(() => resolveImports(this.store));
+    return changed ? "reindexed" : "skipped";
   }
 }

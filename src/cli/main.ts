@@ -112,6 +112,17 @@ export function buildProgram(out: Out, cwd: string): Command {
     });
 
   program
+    .command("watch")
+    .description("Index, then keep the index live as files change")
+    .action(async () => {
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      out("Watching for changes (Ctrl-C to stop)...");
+      vx.watch((e) => out(`${e.result}: ${e.path}`));
+      await new Promise(() => {}); // run until interrupted
+    });
+
+  program
     .command("mcp")
     .description("Start the MCP server over stdio (single 'understand' tool)")
     .action(async () => {
