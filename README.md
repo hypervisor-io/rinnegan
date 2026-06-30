@@ -47,10 +47,24 @@ summarization (that is cognee's bloat; we reject it and keep only the multi-reso
 **Any agent.** `veridex install <agent>` emits MCP config for Claude Code, Cursor, Codex,
 Kiro, Pi, Windsurf, Gemini. MCP stdio is the universal transport.
 
-## Status — Phase 1–6 (v0.1), 54 tests
+## Coverage (v0.1)
 
-Languages: TS/JS (compiler API, type-aware method resolution) + Python, Go, Rust, Java,
-PHP, C#, Ruby (tree-sitter, verified spec registry — adding a grammar is one table entry).
+**Code — 16 languages.** TS/JS (compiler API, type-aware method resolution) + Python,
+Go, Rust, Java, PHP, C#, Ruby, C, C++, Swift, Kotlin, Scala, Zig, Lua, Solidity
+(tree-sitter, verified spec registry — adding a grammar is one table entry).
+
+**Non-code.**
+- **Docs** (`.md/.mdx/.rst/.txt`): markdown links + `[[wikilinks]]` → `references` edges between docs.
+- **Manifests** (`package.json/go.mod/pyproject.toml/pom.xml/cargo.toml/apm.yml`): one
+  canonical package **hub** node per dependency (shared across manifests) + depends_on edges.
+- **MCP configs** (`.mcp.json/mcp.json/claude_desktop_config.json`): server nodes with
+  command/args/env requirements + package refs.
+
+**Deferred (need extra work, not in the tree-sitter-wasms pack):** Terraform/HCL (external
+grammar), composite Vue/Svelte/Astro (script preprocess), Dart (grammar ABI mismatch),
+Elixir/Obj-C (macro/mixed), Fortran/Pascal/Julia/PowerShell/Verilog (no grammar in pack).
+
+## Status — Phase 1–6 (v0.1), 66 tests
 
 ## Status — earlier note, Phase 1–5
 
