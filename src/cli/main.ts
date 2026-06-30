@@ -123,6 +123,16 @@ export function buildProgram(out: Out, cwd: string): Command {
     });
 
   program
+    .command("install [agent]")
+    .description("Print MCP config to connect Veridex to a coding agent (claude-code, cursor, codex, kiro, pi, windsurf, gemini)")
+    .action(async (agent?: string) => {
+      const { renderInstall } = await import("../mcp/install.js");
+      // prefer a global `veridex` binary; fall back to this entry's absolute path
+      const cmd = process.env.VERIDEX_BIN ?? "veridex";
+      out(renderInstall(agent, cmd, ["mcp"]));
+    });
+
+  program
     .command("mcp")
     .description("Start the MCP server over stdio (single 'understand' tool)")
     .action(async () => {
