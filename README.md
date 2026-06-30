@@ -32,16 +32,21 @@ node bin/veridex.js mcp              # MCP server (single 'understand' tool)
 Other commands: `search`, `deps <file>`, `refs <symbol> [--write|--read]`,
 `callers <symbol>`, `impact <symbol>`, `status`. Add `--json` for machine output.
 
-## Status — Phase 1–4 complete (v0.1)
+## Status — Phase 1–5 (v0.1), 43 tests
 
 Working end-to-end: SQLite provenance graph · scope-aware TS/JS extraction
-(read/write tags, honest unresolved boundaries) · deterministic LSA+BM25 semantic
+(read/write tags, honest unresolved boundaries) · **cross-file import resolution** ·
+**Python + Go extractors** (tree-sitter WASM) · deterministic sparse LSA+BM25 semantic
 search · signal engine (minimal spine → provenance rank → budget → position-order →
-whitespace-minimized verifiable render) · library + CLI + MCP server. 37 tests
-incl. byte-determinism and slice-quality gates.
+whitespace-minimized verifiable render) · **incremental file watcher** · library + CLI +
+MCP server. Tests include byte-determinism and slice-quality gates.
 
-Measured on its own source: a task slice is **~85% smaller** than dumping the repo,
-every fact `[ast_exact]`-grounded, using **~0.3% of a 1M context window**.
+**Measured on real codebases:**
+- Its own source: task slice **~85% smaller** than dumping the repo, all `[ast_exact]`,
+  **~0.3% of a 1M window**.
+- repomix (380 TS files, 9.9k symbols): full index in **~6s**, cold `understand` ~1.8s.
+- grepai (198 Go files): `understand "vector store search"` returns the three `Search`
+  backend impls + dedup — correct, by meaning, deterministic.
 
-**Phase 5 (next):** Python/Go extractors, cross-file import resolution, daemon +
-file watcher (Win/WSL/SMB-robust), more languages.
+**Next:** richer cross-file/type-aware resolution (method calls), more languages,
+daemon hardening (Win/WSL/SMB), eval corpus growth.
