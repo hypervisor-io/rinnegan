@@ -30,7 +30,8 @@ export class Veridex {
 
   async indexAll(): Promise<IndexStats> {
     const stats = await new Indexer(this.store).indexAll(this.root);
-    this.semantic = SemanticEngine.build(this.store);
+    // semantic (LSA) is built lazily on first understand/seed — keeps `index` fast
+    this.semantic = null;
     return stats;
   }
 

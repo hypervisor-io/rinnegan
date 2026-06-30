@@ -41,6 +41,7 @@ interface EdgeRow {
  */
 export class GraphStore {
   private db: Database.Database;
+  private stmtCache = new Map<string, Database.Statement>();
 
   private constructor(dbPath: string) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
@@ -48,6 +49,16 @@ export class GraphStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.exec(SCHEMA);
+  }
+
+  /** Memoized prepared statement — compile each SQL once, reuse for every call. */
+  private stmt(sql: string): Database.Statement {
+    let s = this.stmtCache.get(sql);
+    if (!s) {
+      s = this.db.prepare(sql);
+      this.stmtCache.set(sql, s);
+    }
+    return s;
   }
 
   static open(dbPath: string): GraphStore {
@@ -72,7 +83,7 @@ export class GraphStore {
   }
 
   insertNode(n: GraphNode): void {
-    this.db.prepare(
+    this.stmt(
       `INSERT OR REPLACE INTO nodes
        (id,kind,qualified_name,file_path,language,start_line,end_line,signature,docstring,is_exported)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
@@ -80,12 +91,12 @@ export class GraphStore {
       n.signature ?? null, n.docstring ?? null, n.isExported ? 1 : 0);
 
     const tokens = basicTokens(`${n.qualifiedName} ${n.signature ?? ""} ${n.docstring ?? ""}`).join(" ");
-    this.db.prepare(`DELETE FROM nodes_fts WHERE id = ?`).run(n.id);
-    this.db.prepare(`INSERT INTO nodes_fts (id, tokens) VALUES (?, ?)`).run(n.id, tokens);
+    this.stmt(`DELETE FROM nodes_fts WHERE id = ?`).run(n.id);
+    this.stmt(`INSERT INTO nodes_fts (id, tokens) VALUES (?, ?)`).run(n.id, tokens);
   }
 
   insertEdge(e: GraphEdge): void {
-    this.db.prepare(
+    this.stmt(
       `INSERT INTO edges (source,target,kind,line,col,provenance,confidence,resolver,read_write,metadata)
        VALUES (?,?,?,?,?,?,?,?,?,?)`,
     ).run(e.source, e.target, e.kind, e.line, e.col, e.provenance, e.confidence, e.resolver,
@@ -93,12 +104,12 @@ export class GraphStore {
   }
 
   getNode(id: string): GraphNode | undefined {
-    const r = this.db.prepare(`SELECT * FROM nodes WHERE id = ?`).get(id) as NodeRow | undefined;
+    const r = this.stmt(`SELECT * FROM nodes WHERE id = ?`).get(id) as NodeRow | undefined;
     return r ? this.rowToNode(r) : undefined;
   }
 
   outgoing(id: string, kinds?: EdgeKind[]): GraphEdge[] {
-    const rows = this.db.prepare(
+    const rows = this.stmt(
       `SELECT * FROM edges WHERE source = ? ORDER BY target, kind, line`,
     ).all(id) as EdgeRow[];
     const edges = rows.map((r) => this.rowToEdge(r));
@@ -106,7 +117,7 @@ export class GraphStore {
   }
 
   incoming(id: string, kinds?: EdgeKind[]): GraphEdge[] {
-    const rows = this.db.prepare(
+    const rows = this.stmt(
       `SELECT * FROM edges WHERE target = ? ORDER BY source, kind, line`,
     ).all(id) as EdgeRow[];
     const edges = rows.map((r) => this.rowToEdge(r));
@@ -118,7 +129,7 @@ export class GraphStore {
     const toks = [...new Set(basicTokens(query))];
     if (toks.length === 0) return [];
     const match = toks.map((t) => `"${t}"`).join(" OR ");
-    const rows = this.db.prepare(
+    const rows = this.stmt(
       `SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id
        WHERE f.tokens MATCH ? ORDER BY bm25(nodes_fts), n.id LIMIT ?`,
     ).all(match, limit) as NodeRow[];
@@ -130,7 +141,7 @@ export class GraphStore {
     const toks = [...new Set(basicTokens(query))];
     if (toks.length === 0) return [];
     const match = toks.map((t) => `"${t}"`).join(" OR ");
-    const rows = this.db.prepare(
+    const rows = this.stmt(
       `SELECT f.id AS id, bm25(nodes_fts) AS b FROM nodes_fts f
        WHERE f.tokens MATCH ? ORDER BY b, f.id LIMIT ?`,
     ).all(match, limit) as { id: string; b: number }[];
@@ -138,56 +149,56 @@ export class GraphStore {
   }
 
   allNodes(): GraphNode[] {
-    return (this.db.prepare(`SELECT * FROM nodes ORDER BY id`).all() as NodeRow[]).map((r) => this.rowToNode(r));
+    return (this.stmt(`SELECT * FROM nodes ORDER BY id`).all() as NodeRow[]).map((r) => this.rowToNode(r));
   }
 
   allEdges(): GraphEdge[] {
-    return (this.db.prepare(`SELECT * FROM edges ORDER BY source,target,kind,line`).all() as EdgeRow[])
+    return (this.stmt(`SELECT * FROM edges ORDER BY source,target,kind,line`).all() as EdgeRow[])
       .map((r) => this.rowToEdge(r));
   }
 
   // --- imports (for cross-file resolution) ---
   setImports(file: string, refs: ImportRef[]): void {
-    this.db.prepare(`DELETE FROM imports WHERE file = ?`).run(file);
-    const ins = this.db.prepare(
+    this.stmt(`DELETE FROM imports WHERE file = ?`).run(file);
+    const ins = this.stmt(
       `INSERT INTO imports (file,local_name,imported_name,module_spec,line) VALUES (?,?,?,?,?)`,
     );
     for (const r of refs) ins.run(file, r.localName, r.importedName, r.moduleSpec, r.line);
   }
 
   getImports(file: string): ImportRef[] {
-    const rows = this.db.prepare(`SELECT * FROM imports WHERE file = ?`).all(file) as {
+    const rows = this.stmt(`SELECT * FROM imports WHERE file = ?`).all(file) as {
       local_name: string; imported_name: string; module_spec: string; line: number;
     }[];
     return rows.map((r) => ({ localName: r.local_name, importedName: r.imported_name, moduleSpec: r.module_spec, line: r.line }));
   }
 
   fileExists(path: string): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM files WHERE path = ?`).get(path);
+    return !!this.stmt(`SELECT 1 FROM files WHERE path = ?`).get(path);
   }
 
   /** Find an exported top-level symbol by name in a given file. */
   findExportedNode(filePath: string, name: string): GraphNode | undefined {
-    const r = this.db.prepare(
+    const r = this.stmt(
       `SELECT * FROM nodes WHERE file_path = ? AND is_exported = 1 AND qualified_name = ? LIMIT 1`,
     ).get(filePath, name) as NodeRow | undefined;
     return r ? this.rowToNode(r) : undefined;
   }
 
   deleteEdge(e: GraphEdge): void {
-    this.db.prepare(
+    this.stmt(
       `DELETE FROM edges WHERE source=? AND target=? AND kind=? AND line=? AND col=?`,
     ).run(e.source, e.target, e.kind, e.line, e.col);
   }
 
   getFileMeta(path: string): FileMeta | undefined {
-    const r = this.db.prepare(`SELECT * FROM files WHERE path = ?`).get(path) as
+    const r = this.stmt(`SELECT * FROM files WHERE path = ?`).get(path) as
       | { path: string; hash: string; mtime_ms: number; node_ids: string } | undefined;
     return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids) } : undefined;
   }
 
   setFileMeta(path: string, meta: FileMeta): void {
-    this.db.prepare(
+    this.stmt(
       `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids) VALUES (?,?,?,?)`,
     ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds));
   }
@@ -198,12 +209,12 @@ export class GraphStore {
     if (!meta) return;
     const del = this.db.transaction((ids: string[]) => {
       for (const id of ids) {
-        this.db.prepare(`DELETE FROM nodes WHERE id = ?`).run(id);
-        this.db.prepare(`DELETE FROM nodes_fts WHERE id = ?`).run(id);
-        this.db.prepare(`DELETE FROM edges WHERE source = ? OR target = ?`).run(id, id);
+        this.stmt(`DELETE FROM nodes WHERE id = ?`).run(id);
+        this.stmt(`DELETE FROM nodes_fts WHERE id = ?`).run(id);
+        this.stmt(`DELETE FROM edges WHERE source = ? OR target = ?`).run(id, id);
       }
-      this.db.prepare(`DELETE FROM files WHERE path = ?`).run(path);
-      this.db.prepare(`DELETE FROM imports WHERE file = ?`).run(path);
+      this.stmt(`DELETE FROM files WHERE path = ?`).run(path);
+      this.stmt(`DELETE FROM imports WHERE file = ?`).run(path);
     });
     del(meta.nodeIds);
   }
@@ -222,9 +233,9 @@ export class GraphStore {
   }
 
   stats(): { nodes: number; edges: number; files: number } {
-    const n = (this.db.prepare(`SELECT count(*) c FROM nodes`).get() as { c: number }).c;
-    const e = (this.db.prepare(`SELECT count(*) c FROM edges`).get() as { c: number }).c;
-    const f = (this.db.prepare(`SELECT count(*) c FROM files`).get() as { c: number }).c;
+    const n = (this.stmt(`SELECT count(*) c FROM nodes`).get() as { c: number }).c;
+    const e = (this.stmt(`SELECT count(*) c FROM edges`).get() as { c: number }).c;
+    const f = (this.stmt(`SELECT count(*) c FROM files`).get() as { c: number }).c;
     return { nodes: n, edges: e, files: f };
   }
 }

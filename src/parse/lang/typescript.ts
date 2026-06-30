@@ -63,11 +63,11 @@ export function extractTypeScript(path: string, source: string, language: string
   });
 
   const rootScope: Scope = { ownerId: fileId, start: 0, end: source.length, names: new Map(), parent: null };
-  const scopes: Scope[] = [rootScope];
   const scopeStack: Scope[] = [rootScope];
   const nameStack: string[] = [];
   const declNamePos = new Set<number>();
   const ownerForNode = new Map<ts.Node, string>();
+  const nodeScope = new Map<ts.Node, Scope>([[sf, rootScope]]);
   const cur = () => scopeStack[scopeStack.length - 1];
 
   function signatureOf(n: ts.Node): string {
@@ -134,7 +134,7 @@ export function extractTypeScript(path: string, source: string, language: string
     if (functionLike(n)) {
       const owner = ownerForNode.get(n) ?? cur().ownerId;
       const s: Scope = { ownerId: owner, start: n.getStart(sf), end: n.getEnd(), names: new Map(), parent: cur() };
-      scopes.push(s);
+      nodeScope.set(n, s);
       scopeStack.push(s);
       pushedScope = true;
     }
@@ -146,20 +146,6 @@ export function extractTypeScript(path: string, source: string, language: string
   visitA(sf);
 
   // ---- scope/name resolution helpers ----
-  function innermostScope(pos: number): Scope {
-    let best = rootScope;
-    let bestSize = Infinity;
-    for (const s of scopes) {
-      if (s.start <= pos && pos <= s.end) {
-        const size = s.end - s.start;
-        if (size < bestSize) {
-          bestSize = size;
-          best = s;
-        }
-      }
-    }
-    return best;
-  }
   function lookup(scope: Scope, name: string): Decl | undefined {
     for (let s: Scope | null = scope; s; s = s.parent) {
       const d = s.names.get(name);
@@ -204,16 +190,17 @@ export function extractTypeScript(path: string, source: string, language: string
     return "read";
   }
 
-  // ---- Pass B: calls + references ----
-  function visitB(n: ts.Node): void {
+  // ---- Pass B: calls + references (scope threaded via traversal, O(1) lookups) ----
+  function visitB(n: ts.Node, scope: Scope): void {
+    const here = nodeScope.get(n) ?? scope;
     // calls
     if (ts.isCallExpression(n)) {
       const callee = n.expression;
       const line = lineOf(n.getStart(sf));
       const col = colOf(n.getStart(sf));
-      const owner = innermostScope(n.getStart(sf)).ownerId;
+      const owner = here.ownerId;
       if (ts.isIdentifier(callee)) {
-        const resolved = lookup(innermostScope(callee.getStart(sf)), callee.text);
+        const resolved = lookup(here, callee.text);
         if (resolved) {
           pushEdge({ source: owner, target: resolved.id, kind: "calls", line, col, provenance: "ast_exact", confidence: 1, resolver: "ts-scope", readWrite: "call" });
         } else {
@@ -229,8 +216,8 @@ export function extractTypeScript(path: string, source: string, language: string
 
     // variable initializer = write
     if (ts.isVariableDeclaration(n) && n.initializer && ts.isIdentifier(n.name)) {
-      const resolved = lookup(innermostScope(n.name.getStart(sf)), n.name.text);
-      const owner = innermostScope(n.getStart(sf)).ownerId;
+      const resolved = lookup(here, n.name.text);
+      const owner = here.ownerId;
       if (resolved) {
         pushEdge({ source: owner, target: resolved.id, kind: "references", line: lineOf(n.name.getStart(sf)), col: colOf(n.name.getStart(sf)), provenance: "ast_exact", confidence: 1, resolver: "ts-scope", readWrite: "write" });
       }
@@ -242,10 +229,10 @@ export function extractTypeScript(path: string, source: string, language: string
       const isCallee = ts.isCallExpression(p) && p.expression === n;
       const isPropName = ts.isPropertyAccessExpression(p) && p.name === n;
       if (!isCallee && !isPropName) {
-        const resolved = lookup(innermostScope(n.getStart(sf)), n.text);
+        const resolved = lookup(here, n.text);
         if (resolved && resolved.kind !== "function" && resolved.kind !== "class") {
           const rw = readWriteOf(n);
-          const owner = innermostScope(n.getStart(sf)).ownerId;
+          const owner = here.ownerId;
           if (owner !== resolved.id) {
             pushEdge({ source: owner, target: resolved.id, kind: "references", line: lineOf(n.getStart(sf)), col: colOf(n.getStart(sf)), provenance: "ast_exact", confidence: 1, resolver: "ts-scope", readWrite: rw });
           }
@@ -253,9 +240,9 @@ export function extractTypeScript(path: string, source: string, language: string
       }
     }
 
-    ts.forEachChild(n, visitB);
+    ts.forEachChild(n, (c) => visitB(c, here));
   }
-  visitB(sf);
+  visitB(sf, rootScope);
 
   return { nodes, edges, unresolved, imports };
 }

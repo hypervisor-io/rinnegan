@@ -1,11 +1,13 @@
+import type { SparseMatrix } from "./svd.js";
+
 /** TF-IDF term–document matrix builder. Deterministic; vocab sorted. */
 
 export interface Tfidf {
   vocab: string[];
   termIndex: Map<string, number>;
   idf: number[];
-  /** terms × docs weighted matrix */
-  matrix: number[][];
+  /** sparse terms × docs weighted matrix */
+  sparse: SparseMatrix;
 }
 
 /** Build a TF-IDF matrix from per-document token lists. Vocab capped to keep SVD tractable. */
@@ -28,20 +30,22 @@ export function buildTfidf(docsTokens: string[][], maxVocab = 2000): Tfidf {
   const termIndex = new Map<string, number>();
   vocab.forEach((t, i) => termIndex.set(t, i));
 
-  const idf = vocab.map((t) => Math.log(1 + N / (df.get(t)! )));
+  const idf = vocab.map((t) => Math.log(1 + N / (df.get(t)!)));
 
-  const matrix: number[][] = vocab.map(() => new Array<number>(N).fill(0));
-  docsTokens.forEach((toks, d) => {
+  // sparse columns: one per document, each a list of {row=termIndex, val=tfidf}
+  const colData: { row: number; val: number }[][] = docsTokens.map((toks) => {
     const tf = new Map<number, number>();
     for (const t of toks) {
       const ti = termIndex.get(t);
       if (ti !== undefined) tf.set(ti, (tf.get(ti) ?? 0) + 1);
     }
     const len = toks.length || 1;
-    for (const [ti, c] of tf) matrix[ti][d] = (c / len) * idf[ti];
+    return [...tf.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([ti, c]) => ({ row: ti, val: (c / len) * idf[ti] }));
   });
 
-  return { vocab, termIndex, idf, matrix };
+  return { vocab, termIndex, idf, sparse: { rows: vocab.length, cols: N, colData } };
 }
 
 /** Project a query's tokens into the TF-IDF term space (a terms-length vector). */

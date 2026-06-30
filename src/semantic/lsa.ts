@@ -24,7 +24,7 @@ export class LsaIndex {
     private docLatent: number[][], // docs × k
   ) {}
 
-  static build(docs: SymbolDoc[], k = 100): LsaIndex {
+  static build(docs: SymbolDoc[], k = 96): LsaIndex {
     const ids = docs.map((d) => d.id);
     const tokens = docs.map((d) => docTokens(d.text));
     const tf = buildTfidf(tokens);
@@ -32,7 +32,7 @@ export class LsaIndex {
     const nDocs = docs.length;
     const kk = Math.max(1, Math.min(k, terms, nDocs));
 
-    const { u, s, v } = truncatedSvd(tf.matrix, kk, { seed: 1 });
+    const { u, s, v } = truncatedSvd(tf.sparse, kk, { seed: 1 });
     // doc latent = s ⊙ V[doc]
     const docLatent = v.map((row) => row.map((val, j) => val * s[j]));
     return new LsaIndex(ids, tf, u, docLatent);

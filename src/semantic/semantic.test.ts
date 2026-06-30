@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { truncatedSvd } from "./svd.js";
+import { truncatedSvd, denseToSparse } from "./svd.js";
 import { LsaIndex } from "./lsa.js";
 import { Bm25Index } from "./bm25.js";
 import { rrfFuse } from "./fuse.js";
@@ -12,8 +12,9 @@ describe("truncatedSvd", () => {
       [1, 1, 0],
       [0, 0, 1],
     ];
-    const a = truncatedSvd(m, 2, { seed: 42 });
-    const b = truncatedSvd(m, 2, { seed: 42 });
+    const sparse = denseToSparse(m);
+    const a = truncatedSvd(sparse, 2, { seed: 42 });
+    const b = truncatedSvd(sparse, 2, { seed: 42 });
     expect(a.s).toEqual(b.s);
     expect(a.u).toEqual(b.u);
     expect(a.v).toEqual(b.v);
