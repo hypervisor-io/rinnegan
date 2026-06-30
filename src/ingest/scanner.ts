@@ -18,6 +18,7 @@ export const LANG_EXT: Record<string, string> = {
   ".ml": "ocaml", ".mli": "ocaml", ".res": "rescript", ".resi": "rescript",
   ".ex": "elixir", ".exs": "elixir",
   ".vue": "vue", ".svelte": "svelte", ".astro": "astro",
+  ".tf": "terraform", ".tfvars": "terraform", ".hcl": "terraform",
 };
 
 const IGNORE_DIRS = new Set([

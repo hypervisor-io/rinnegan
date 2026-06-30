@@ -1,5 +1,7 @@
 import Parser from "web-tree-sitter";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { nodeId } from "../core/types.js";
 import type { GraphNode, GraphEdge, NodeKind } from "../core/types.js";
 import type { ParseResult } from "./extract.js";
@@ -32,11 +34,24 @@ const WASM: Record<string, string> = {
   elixir: "tree-sitter-elixir",
 };
 
+// Grammars not shipped by tree-sitter-wasms; the ABI-compatible .wasm is vendored
+// under vendor/wasm/ (resolved relative to this module, works in src and dist).
+const VENDOR_WASM: Record<string, string> = {
+  terraform: "tree-sitter-terraform",
+};
+
+function wasmPathFor(language: string): string {
+  if (VENDOR_WASM[language]) {
+    return join(dirname(fileURLToPath(import.meta.url)), "../../vendor/wasm", `${VENDOR_WASM[language]}.wasm`);
+  }
+  return require.resolve(`tree-sitter-wasms/out/${WASM[language]}.wasm`);
+}
+
 async function getParser(language: string): Promise<Parser> {
   if (!initPromise) initPromise = (Parser as unknown as { init: () => Promise<void> }).init();
   await initPromise;
   if (!langCache.has(language)) {
-    const wasm = require.resolve(`tree-sitter-wasms/out/${WASM[language]}.wasm`);
+    const wasm = wasmPathFor(language);
     const Lang = await (Parser as unknown as { Language: { load: (p: string) => Promise<unknown> } }).Language.load(wasm);
     langCache.set(language, Lang);
   }

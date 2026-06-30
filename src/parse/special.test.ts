@@ -57,6 +57,30 @@ describe("sfc extractor (vue/svelte/astro)", () => {
   });
 });
 
+describe("terraform extractor", () => {
+  const src = [
+    'variable "region" { default = "us-east-1" }',
+    'resource "aws_instance" "web" {',
+    "  ami = var.region",
+    "  count = var.missing",
+    "}",
+    'module "vpc" { source = "./vpc" }',
+  ].join("\n");
+  it("extracts blocks as label-named definitions", async () => {
+    const r = await parseFile("main.tf", src, "terraform");
+    expect(r.nodes.some((n) => n.qualifiedName === "variable.region" && n.kind === "variable")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName === "resource.aws_instance.web")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName === "module.vpc" && n.kind === "module")).toBe(true);
+  });
+  it("resolves var.* references (ast_exact) and marks unknown refs unresolved", async () => {
+    const r = await parseFile("main.tf", src, "terraform");
+    const ref = r.edges.find((e) => e.kind === "references" && e.provenance === "ast_exact");
+    expect(ref).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === ref!.target)?.qualifiedName).toBe("variable.region");
+    expect(r.edges.some((e) => e.kind === "references" && e.provenance === "unresolved")).toBe(true);
+  });
+});
+
 describe("mcp config extractor", () => {
   it("emits a server node with env requirements and a package ref", async () => {
     const src = JSON.stringify({ mcpServers: { veridex: { command: "npx", args: ["-y", "veridex-mcp"], env: { TOKEN: "x" } } } });
