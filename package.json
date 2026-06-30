@@ -10,7 +10,7 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').copyFileSync('src/graph/schema.sql','dist/graph/schema.sql')\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "cli": "tsx src/cli/main.ts",
@@ -20,10 +20,12 @@
     "node": ">=20"
   },
   "dependencies": {
+    "better-sqlite3": "^11.3.0",
     "commander": "^12.1.0",
     "typescript": "^5.6.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"

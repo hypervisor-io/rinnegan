@@ -10,7 +10,9 @@
 
 ## Global Constraints
 
-- Node.js >= 22.5 (built-in `node:sqlite`); ESM modules (`"type": "module"`).
+- Node.js >= 20; ESM modules (`"type": "module"`). SQLite via `better-sqlite3`
+  (prebuilt binary, WAL + FTS5) — the durable codebase knowledge store, NOT a flat
+  dump. (`node:sqlite` is interchangeable behind `GraphStore` on Node ≥22.5.)
 - NO neural embeddings, NO external AI/tokenization API anywhere. Semantic layer is pure local linear algebra.
 - Determinism: identical corpus ⇒ byte-identical index and byte-identical `understand()` output. No `Date.now()`/`Math.random()` in index or output paths.
 - Every emitted graph edge MUST carry `provenance` and `confidence`. Only `ast_exact` is "ground truth".
