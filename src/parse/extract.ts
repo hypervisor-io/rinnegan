@@ -1,5 +1,6 @@
 import type { GraphNode, GraphEdge } from "../core/types.js";
 import { extractTypeScript } from "./lang/typescript.js";
+import { extractTreeSitter, PYTHON_CONFIG, GO_CONFIG } from "./treesitter.js";
 
 export interface ImportRef {
   localName: string;
@@ -29,6 +30,10 @@ export async function parseFile(
     case "typescript":
     case "javascript":
       return extractTypeScript(path, source, language);
+    case "python":
+      return extractTreeSitter(path, source, "python", PYTHON_CONFIG);
+    case "go":
+      return extractTreeSitter(path, source, "go", GO_CONFIG);
     default:
       return { nodes: [], edges: [], unresolved: 0, imports: [] };
   }
