@@ -30,6 +30,33 @@ describe("manifest extractor", () => {
   });
 });
 
+describe("sfc extractor (vue/svelte/astro)", () => {
+  const vue = [
+    "<template><div>{{ msg }}</div></template>",
+    '<script setup lang="ts">',
+    "function greet() { return build(); }",
+    "function build() { return 1; }",
+    "greet();",
+    "</script>",
+  ].join("\n");
+  it("extracts script-block defs and resolves in-file calls (ast_exact)", async () => {
+    const r = await parseFile("App.vue", vue, "vue");
+    expect(r.nodes.some((n) => n.qualifiedName === "greet" && n.kind === "function")).toBe(true);
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
+  });
+  it("remaps line numbers back to the original file", async () => {
+    const r = await parseFile("App.vue", vue, "vue");
+    const greet = r.nodes.find((n) => n.qualifiedName === "greet");
+    expect(greet?.startLine).toBe(3); // function greet is on physical line 3
+  });
+  it("handles svelte with no lang attribute", async () => {
+    const svelte = ["<script>", "function inc(n) { return n + 1; }", "</script>", "<button>x</button>"].join("\n");
+    const r = await parseFile("C.svelte", svelte, "svelte");
+    const inc = r.nodes.find((n) => n.qualifiedName === "inc");
+    expect(inc?.startLine).toBe(2);
+  });
+});
+
 describe("mcp config extractor", () => {
   it("emits a server node with env requirements and a package ref", async () => {
     const src = JSON.stringify({ mcpServers: { veridex: { command: "npx", args: ["-y", "veridex-mcp"], env: { TOKEN: "x" } } } });
