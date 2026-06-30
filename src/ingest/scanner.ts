@@ -13,6 +13,7 @@ export const LANG_EXT: Record<string, string> = {
   ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp", ".hxx": "cpp",
   ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin", ".scala": "scala",
   ".zig": "zig", ".lua": "lua", ".sol": "solidity",
+  ".m": "objc", ".mm": "objc",
 };
 
 const IGNORE_DIRS = new Set([

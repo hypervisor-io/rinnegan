@@ -71,3 +71,26 @@ describe("extended grammars", () => {
     expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
   });
 });
+
+describe("objective-c", () => {
+  const src = [
+    "@interface Foo : NSObject",
+    "- (int)bar:(int)x;",
+    "@end",
+    "@implementation Foo",
+    "- (int)bar:(int)x { return [self baz:x]; }",
+    "- (int)baz:(int)y { return y; }",
+    "@end",
+  ].join("\n");
+  it("extracts class + methods", async () => {
+    const r = await parseFile("Foo.m", src, "objc");
+    expect(r.nodes.some((n) => n.qualifiedName.endsWith("Foo") && n.kind === "class")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName.endsWith("baz") && n.kind === "method")).toBe(true);
+  });
+  it("resolves an in-file message send (ast_exact)", async () => {
+    const r = await parseFile("Foo.m", src, "objc");
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    expect(call).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === call!.target)?.qualifiedName.endsWith("baz")).toBe(true);
+  });
+});

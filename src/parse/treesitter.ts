@@ -25,6 +25,7 @@ const WASM: Record<string, string> = {
   zig: "tree-sitter-zig",
   lua: "tree-sitter-lua",
   solidity: "tree-sitter-solidity",
+  objc: "tree-sitter-objc",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -352,5 +353,18 @@ export const SPECS: Record<string, LangConfig> = {
     calls: [{ type: "call_expression", fnField: "function" }],
     identType: "identifier",
     selectorTypes: ["member_expression"],
+  },
+  objc: {
+    defs: [
+      // class name is the first identifier; superclass is the second (firstIdent picks the name).
+      { type: "class_interface", kind: "class", nameStrategy: "firstIdent" },
+      { type: "class_implementation", kind: "class", nameStrategy: "firstIdent" },
+      // method_type wraps the return type, so the first bare identifier is the selector name.
+      { type: "method_declaration", kind: "method", nameStrategy: "firstIdent" },
+      { type: "method_definition", kind: "method", nameStrategy: "firstIdent" },
+    ],
+    calls: [{ type: "message_expression", fnField: "method" }],
+    identType: "identifier",
+    selectorTypes: [],
   },
 };
