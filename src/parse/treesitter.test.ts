@@ -70,6 +70,12 @@ describe("extended grammars", () => {
     const r = await parseFile("a.c", "int login(char* u){ return validate(u); } int validate(char* u){ return 1; }", "c");
     expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "ast_exact")).toBe(true);
   });
+  it("attributes a call to its enclosing function, not the file", async () => {
+    const r = await parseFile("a.go", "package main\nfunc Login() bool { return validate() }\nfunc validate() bool { return true }", "go");
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    const source = r.nodes.find((n) => n.id === call!.source);
+    expect(source?.qualifiedName).toBe("Login"); // not "<file>"
+  });
 });
 
 describe("elixir", () => {

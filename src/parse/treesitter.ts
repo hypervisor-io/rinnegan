@@ -142,7 +142,11 @@ export async function extractTreeSitter(
   cfg: LangConfig,
 ): Promise<ParseResult> {
   const parser = await getParser(language);
-  const tree = parser.parse(source) as unknown as { rootNode: TsNode };
+  // Capture the root wrapper ONCE: web-tree-sitter returns a fresh node wrapper on
+  // each `.rootNode` access, and node identity must be stable across both passes for
+  // the defNodeId Map (keyed by pass-A nodes) to match in pass B — otherwise every
+  // call is misattributed to the file instead of its enclosing definition.
+  const root = (parser.parse(source) as unknown as { rootNode: TsNode }).rootNode;
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   let unresolved = 0;
@@ -180,7 +184,7 @@ export async function extractTreeSitter(
     }
     for (const c of n.namedChildren) walkDefs(c, stack, owner);
   }
-  walkDefs(tree.rootNode, [], fileId);
+  walkDefs(root, [], fileId);
 
   const unresolvedNodes = new Set<string>();
   function ensureUnresolved(name: string, line: number): string {
@@ -224,7 +228,7 @@ export async function extractTreeSitter(
     }
     for (const c of n.namedChildren) walkCalls(c, owner);
   }
-  walkCalls(tree.rootNode, fileId);
+  walkCalls(root, fileId);
 
   return { nodes, edges, unresolved, imports: [] };
 }
