@@ -1,5 +1,16 @@
 import { GraphStore } from "../graph/store.js";
-import { PROVENANCE_TRUST, type GraphNode } from "../core/types.js";
+import { PROVENANCE_TRUST, type GraphNode, type NodeKind } from "../core/types.js";
+
+/**
+ * Definition-level symbols carry the signal; locals/params are mostly noise.
+ * This weight pushes functions/classes up and incidental bindings down.
+ */
+const KIND_WEIGHT: Record<NodeKind, number> = {
+  function: 1, method: 1, class: 1, interface: 0.95, struct: 0.95,
+  type_alias: 0.8, enum: 0.8, enum_member: 0.4, module: 0.7, namespace: 0.7,
+  constant: 0.5, property: 0.55, field: 0.55,
+  variable: 0.3, export: 0.4, import: 0.1, unresolved: 0.25, file: 0,
+};
 
 export interface Ranked {
   node: GraphNode;
@@ -33,7 +44,8 @@ export function rankNodes(
     }
     if (node.kind === "unresolved") trust = 0;
 
-    const score = (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust);
+    const kindW = KIND_WEIGHT[node.kind] ?? 0.5;
+    const score = (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust) * kindW;
     out.push({ node, score, relevance: rel, centrality, trust });
   }
   return out.sort(

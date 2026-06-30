@@ -63,3 +63,11 @@ describe("Bm25Index + rrfFuse", () => {
     expect(fused[0].id).toBe("auth");
   });
 });
+
+import { docTokens, expandSynonyms } from "./tokenize.js";
+describe("tokenize prototype safety", () => {
+  it("handles prototype-named tokens without crashing (regression)", () => {
+    expect(() => expandSynonyms(["constructor", "toString", "hasOwnProperty"])).not.toThrow();
+    expect(docTokens("constructor valueOf")).toContain("constructor");
+  });
+});

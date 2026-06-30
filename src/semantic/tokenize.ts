@@ -37,7 +37,11 @@ export function splitIdentifier(s: string): string[] {
 /** Expand a token list with curated synonyms (does not duplicate existing tokens). */
 export function expandSynonyms(tokens: string[]): string[] {
   const out = new Set(tokens);
-  for (const t of tokens) for (const syn of SYNONYMS[t] ?? []) out.add(syn);
+  for (const t of tokens) {
+    // own-property guard: tokens like "constructor"/"toString" must not hit the prototype
+    const syns = Object.hasOwn(SYNONYMS, t) ? SYNONYMS[t] : [];
+    for (const syn of syns) out.add(syn);
+  }
   return [...out];
 }
 
