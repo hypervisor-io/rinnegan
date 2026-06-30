@@ -1,13 +1,13 @@
-# Veridex — Design Spec
+# Rinnegan — Design Spec
 
 **Status:** Approved (2026-06-30)
-**Working name:** Veridex *(verifiable index)*
+**Working name:** Rinnegan *(verifiable index)*
 
 ---
 
 ## 1. Thesis
 
-Veridex is a verifiable code-knowledge engine. For any task it returns the
+Rinnegan is a verifiable code-knowledge engine. For any task it returns the
 **minimal, maximal-signal, provenance-tagged** slice of a codebase — the smallest
 set of facts an AI agent needs to write precise, hallucination-free code.
 
@@ -38,7 +38,7 @@ classical, fully-local **latent-semantic (LSA)** layer (§5), not neural embeddi
 
 ## 2. What we must beat (issues found in the base tools)
 
-| Tool | Concrete issue | Veridex response |
+| Tool | Concrete issue | Rinnegan response |
 |---|---|---|
 | codegraph | Same-named symbol resolves to wrong (first) def — #1079 | Scope/FQN-aware resolution (§4) |
 | codegraph | No file-scoped dependency query — #500 | First-class `deps` query (§7) |
@@ -79,7 +79,7 @@ reaches past its neighbor's interface.
 - Git-first file enumeration (`git ls-files`, tracked + untracked, gitignore-correct),
   fallback directory walk for non-git dirs.
 - Ignore stack: defaults (node_modules, dist, vendor, lockfiles, …) + `.gitignore`
-  + `.veridexignore` + CLI/config patterns.
+  + `.rinneganignore` + CLI/config patterns.
 - Filters: >1 MB skip, binary detection, minified detection (`*.min.js`, `*.bundle.*`).
 - Two-gate incremental: (1) mtime ≤ lastIndex AND already-indexed ⇒ skip; (2) read,
   SHA-256, compare stored hash ⇒ skip if unchanged.
@@ -190,7 +190,7 @@ Pipeline for `understand(task)`:
      printed line numbers (e.g. `10 → 13`) unambiguously signals the gap.
    - **Trailing-whitespace trim.**
    This is the "signal not noise" principle applied to literal characters. It stacks on
-   top of minimal-spine selection: repomix dumps whole files *with* whitespace; Veridex
+   top of minimal-spine selection: repomix dumps whole files *with* whitespace; Rinnegan
    emits the minimal spine *without* redundant whitespace.
 
 **Secondary queries** (library + CLI + hidden MCP tools): `search`, `node`,
@@ -222,7 +222,7 @@ worktree-aware PID/ready files (grepai); per-file staleness banners on query out
 callers, callees, impact, refs, explain`. Dual output: rich/ANSI for humans,
 compact/structured for LLM piping (fixes codegraph's human-only output, #500 theme).
 
-**Library** (`src/index.ts`) — `Veridex.init/open`, `indexAll`, `understand`,
+**Library** (`src/index.ts`) — `Rinnegan.init/open`, `indexAll`, `understand`,
 `search`, `getDeps`, `getRefs`, `getCallers`, `getImpact`, `watch`. The shared core
 that forces clean boundaries.
 

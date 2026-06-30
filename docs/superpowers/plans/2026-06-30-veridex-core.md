@@ -1,4 +1,4 @@
-# Veridex Core Implementation Plan
+# Rinnegan Core Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -31,9 +31,9 @@
 
 - [ ] **Step 1:** Write `package.json` with ESM, scripts (`build`, `test`, `test:watch`, `cli`), deps: `web-tree-sitter`, `tree-sitter-typescript`, `tree-sitter-python`, `tree-sitter-go`, `commander`, `@modelcontextprotocol/sdk`; devDeps: `typescript`, `vitest`, `@types/node`.
 - [ ] **Step 2:** Write `tsconfig.json` (target ES2022, module NodeNext, strict, outDir `dist`, rootDir `src`).
-- [ ] **Step 3:** Write `vitest.config.ts`, `.gitignore` (`node_modules`, `dist`, `.veridex`, `*.wasm` cache), `src/version.ts` (`export const VERSION = "0.1.0"`).
+- [ ] **Step 3:** Write `vitest.config.ts`, `.gitignore` (`node_modules`, `dist`, `.rinnegan`, `*.wasm` cache), `src/version.ts` (`export const VERSION = "0.1.0"`).
 - [ ] **Step 4:** Run `npm install`. Expected: deps resolve.
-- [ ] **Step 5:** Commit `chore: scaffold Veridex TS project`.
+- [ ] **Step 5:** Commit `chore: scaffold Rinnegan TS project`.
 
 ---
 
@@ -167,7 +167,7 @@ describe("GraphStore", () => {
 - Test: `src/ingest/scanner.test.ts`
 
 **Interfaces:**
-- Produces: `scanFiles(root, opts?)` → `{ path, size }[]`; git-first (`git ls-files`), fallback walk; ignores defaults + `.gitignore`/`.veridexignore`; skips >1MB, binary ext, `*.min.*`/`*.bundle.*`. `contentHash(buf)` → sha256.
+- Produces: `scanFiles(root, opts?)` → `{ path, size }[]`; git-first (`git ls-files`), fallback walk; ignores defaults + `.gitignore`/`.rinneganignore`; skips >1MB, binary ext, `*.min.*`/`*.bundle.*`. `contentHash(buf)` → sha256.
 
 - [ ] **Step 1: Write failing test** — scanning a temp dir returns source files, excludes `node_modules` and `*.min.js`.
 - [ ] **Step 2:** Run test. Expected: FAIL.
@@ -286,29 +286,29 @@ it("svd is deterministic + sign-canonical", () => {
 - Test: `src/library.test.ts`
 
 **Interfaces:**
-- Produces: `class Veridex` — `static open(root)`, `indexAll()`, `understand(task, opts?)`, `search(q)`, `deps(filePath)`, `refs(symbol, {readWrite?})`, `callers(symbol)`, `impact(symbol)`, `close()`. Wires Tasks 2–7.
+- Produces: `class Rinnegan` — `static open(root)`, `indexAll()`, `understand(task, opts?)`, `search(q)`, `deps(filePath)`, `refs(symbol, {readWrite?})`, `callers(symbol)`, `impact(symbol)`, `close()`. Wires Tasks 2–7.
 
-- [ ] **Step 1: Write failing test** — `Veridex.open(fixtureRoot)` → `indexAll()` → `understand("authentication")` returns text mentioning the auth fixture symbol.
+- [ ] **Step 1: Write failing test** — `Rinnegan.open(fixtureRoot)` → `indexAll()` → `understand("authentication")` returns text mentioning the auth fixture symbol.
 - [ ] **Step 2:** Run test. Expected: FAIL.
 - [ ] **Step 3: Implement** facade.
 - [ ] **Step 4:** Run test. Expected: PASS.
-- [ ] **Step 5:** Commit `feat(lib): Veridex public API`.
+- [ ] **Step 5:** Commit `feat(lib): Rinnegan public API`.
 
 ---
 
 ### Task 9: CLI
 
 **Files:**
-- Create: `src/cli/main.ts`, `bin/veridex.js`
+- Create: `src/cli/main.ts`, `bin/rinnegan.js`
 - Test: `src/cli/cli.test.ts`
 
 **Interfaces:**
-- Consumes: `Veridex` library.
+- Consumes: `Rinnegan` library.
 - Produces: commander program — `init`, `index`, `status`, `understand <task>`, `search <q>`, `deps <file>`, `refs <symbol>`, `callers <symbol>`, `impact <symbol>`. `--json` flag for LLM-friendly output (vs human ANSI).
 
 - [ ] **Step 1: Write failing test** — invoking `understand` handler on a fixture prints text containing the anchor symbol.
 - [ ] **Step 2:** Run test. Expected: FAIL.
-- [ ] **Step 3: Implement** CLI; `bin/veridex.js` shebang entry.
+- [ ] **Step 3: Implement** CLI; `bin/rinnegan.js` shebang entry.
 - [ ] **Step 4:** Run test. Expected: PASS.
 - [ ] **Step 5:** Commit `feat(cli): human + --json command surface`.
 
@@ -321,8 +321,8 @@ it("svd is deterministic + sign-canonical", () => {
 - Test: `src/mcp/server.test.ts`
 
 **Interfaces:**
-- Consumes: `Veridex` library, `@modelcontextprotocol/sdk`.
-- Produces: MCP server over stdio (SDK handles spec-correct framing — fixes #172). One LISTED tool `understand({task, projectPath?})`; `projectPath` optional, resolved from cwd/single index (fixes #196). Hidden tools (`search,node,deps,refs,callers,impact`) registered behind `VERIDEX_MCP_TOOLS` env (anti-#1080). `instructions.ts` = initialize text: "call understand first; output is Read-equivalent; only ast_exact is ground truth; do not re-grep."
+- Consumes: `Rinnegan` library, `@modelcontextprotocol/sdk`.
+- Produces: MCP server over stdio (SDK handles spec-correct framing — fixes #172). One LISTED tool `understand({task, projectPath?})`; `projectPath` optional, resolved from cwd/single index (fixes #196). Hidden tools (`search,node,deps,refs,callers,impact`) registered behind `RINNEGAN_MCP_TOOLS` env (anti-#1080). `instructions.ts` = initialize text: "call understand first; output is Read-equivalent; only ast_exact is ground truth; do not re-grep."
 
 - [ ] **Step 1: Write failing test** — calling the registered `understand` tool handler with `{task}` on a fixture returns content text with the anchor symbol; tool list length === 1 by default.
 - [ ] **Step 2:** Run test. Expected: FAIL.
@@ -338,7 +338,7 @@ it("svd is deterministic + sign-canonical", () => {
 - Create: `eval/corpus/` (small fixture repo), `eval/determinism.test.ts`, `eval/slice.test.ts`
 
 **Interfaces:**
-- Consumes: `Veridex`.
+- Consumes: `Rinnegan`.
 - Produces: gate tests — (a) index two fresh runs over the corpus ⇒ identical node/edge dumps (byte-determinism); (b) `understand` output identical across runs; (c) "slice contains the answer": for a known task, output includes the symbols a known change touches; (d) token budget respected.
 
 - [ ] **Step 1: Write failing tests** for (a)-(d).
@@ -353,7 +353,7 @@ it("svd is deterministic + sign-canonical", () => {
 
 - **Spec coverage:** §4 ingest/parse→T3,T4; §5 graph/provenance→T1,T2; §6 semantic→T6; §7 signal→T7; §8 surfaces→T8,T9,T10; §9 anti-hallucination contract→T7 render + T10 instructions + T11 gates; §11 testing→T11; §2 issue fixes mapped (#1079→T4, #996→T4/T8, #500→T8/T9 deps, #172→T10, #196→T10, #1080→T10). Phase-5 breadth (Python/Go extractors, daemon, watcher) noted as follow-on plan.
 - **Placeholders:** algorithmic core (types, store test, LSA/SVD, ranking) given as real code; standard scaffolding/IO modules described with exact interfaces + tests.
-- **Type consistency:** `understand(store, semantic, task, opts)` (T7) wrapped by `Veridex.understand(task, opts?)` (T8) consumed by CLI (T9) + MCP (T10); `GraphEdge.provenance/confidence/readWrite` consistent T1→T2→T4→T7.
+- **Type consistency:** `understand(store, semantic, task, opts)` (T7) wrapped by `Rinnegan.understand(task, opts?)` (T8) consumed by CLI (T9) + MCP (T10); `GraphEdge.provenance/confidence/readWrite` consistent T1→T2→T4→T7.
 
 ## Follow-on (Phase 5, separate plan)
 Python + Go extractors, daemon/socket lifecycle (Win/WSL/SMB-robust), file watcher with staleness banners, more languages, skeletonization tuning.

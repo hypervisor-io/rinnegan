@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Veridex } from "./index.js";
+import { Rinnegan } from "./index.js";
 
-describe("Veridex library", () => {
+describe("Rinnegan library", () => {
   let root: string;
-  let vx: Veridex;
+  let vx: Rinnegan;
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), "veridex-lib-"));
+    root = mkdtempSync(join(tmpdir(), "rinnegan-lib-"));
     writeFileSync(
       join(root, "auth.ts"),
       [
@@ -23,7 +23,7 @@ describe("Veridex library", () => {
         "}",
       ].join("\n"),
     );
-    vx = Veridex.open(root, { dbPath: ":memory:" });
+    vx = Rinnegan.open(root, { dbPath: ":memory:" });
     await vx.indexAll();
   });
   afterAll(() => {

@@ -7,7 +7,7 @@ import { Indexer } from "../index/indexer.js";
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "veridex-imp-"));
+  root = mkdtempSync(join(tmpdir(), "rinnegan-imp-"));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 

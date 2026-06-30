@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Veridex } from "../index.js";
+import { Rinnegan } from "../index.js";
 import { VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 
@@ -14,8 +14,8 @@ export interface ToolDef {
 
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
-/** Build the tool registry against a Veridex instance. */
-export function buildTools(vx: Veridex): { listed: ToolDef[]; all: ToolDef[] } {
+/** Build the tool registry against a Rinnegan instance. */
+export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } {
   const understand: ToolDef = {
     name: "understand",
     description:
@@ -72,17 +72,17 @@ export function buildTools(vx: Veridex): { listed: ToolDef[]; all: ToolDef[] } {
   };
 
   const all = [understand, search, deps, refs, callers, impact];
-  const exposeAll = process.env.VERIDEX_MCP_TOOLS === "all";
+  const exposeAll = process.env.RINNEGAN_MCP_TOOLS === "all";
   return { listed: exposeAll ? all : [understand], all };
 }
 
 /** Create the MCP server (low-level Server → spec-correct stdio framing via the SDK). */
-export function createServer(vx: Veridex): Server {
+export function createServer(vx: Rinnegan): Server {
   const { listed, all } = buildTools(vx);
   const byName = new Map(all.map((t) => [t.name, t]));
 
   const server = new Server(
-    { name: "veridex", version: VERSION },
+    { name: "rinnegan", version: VERSION },
     { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
   );
 
@@ -105,7 +105,7 @@ export function createServer(vx: Veridex): Server {
 
 /** Start the MCP server over stdio for a project root. projectPath is optional by design. */
 export async function runMcp(root: string = process.cwd()): Promise<void> {
-  const vx = Veridex.open(root);
+  const vx = Rinnegan.open(root);
   if (vx.stats().nodes === 0) await vx.indexAll();
   const server = createServer(vx);
   await server.connect(new StdioServerTransport());

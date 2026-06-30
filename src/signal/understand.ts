@@ -68,7 +68,7 @@ export function understand(
 
   // Harmonic multi-resolution memory (default): MAP → SIGNATURES → DETAIL.
   if ((opts.resolution ?? "harmonic") === "harmonic") {
-    const header = [`# Veridex slice for: ${task}`, LEGEND, ""].join("\n");
+    const header = [`# Rinnegan slice for: ${task}`, LEGEND, ""].join("\n");
     const inner = Math.max(200, tokenBudget - estimateTokens(header) - 30); // reserve fixed overhead
     const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance });
     const text = [header, h.text].join("\n");
@@ -77,7 +77,7 @@ export function understand(
 
   // Greedy budgeted selection (best-first). Top `fullCount` get full source; rest skeleton.
   const selected: RenderedFact[] = [];
-  let used = estimateTokens(LEGEND) + estimateTokens(`# Veridex slice for: ${task}`);
+  let used = estimateTokens(LEGEND) + estimateTokens(`# Rinnegan slice for: ${task}`);
   ranked.forEach((r, i) => {
     const skeleton = i >= fullCount;
     const src = skeleton ? undefined : readSource(r.node.filePath);
@@ -90,7 +90,7 @@ export function understand(
 
   const ordered = positionOrder(selected);
   const text = [
-    `# Veridex slice for: ${task}`,
+    `# Rinnegan slice for: ${task}`,
     LEGEND,
     "",
     ...ordered.map((f) => f.body),

@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { GraphStore } from "../src/graph/store.js";
 import { Indexer } from "../src/index/indexer.js";
-import { Veridex } from "../src/index.js";
+import { Rinnegan } from "../src/index.js";
 
 const corpus = join(dirname(fileURLToPath(import.meta.url)), "corpus");
 
@@ -16,7 +16,7 @@ async function indexDump(): Promise<string> {
 }
 
 async function sliceText(task: string): Promise<string> {
-  const vx = Veridex.open(corpus, { dbPath: ":memory:" });
+  const vx = Rinnegan.open(corpus, { dbPath: ":memory:" });
   await vx.indexAll();
   const t = vx.understand(task).text;
   vx.close();

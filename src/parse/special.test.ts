@@ -83,11 +83,11 @@ describe("terraform extractor", () => {
 
 describe("mcp config extractor", () => {
   it("emits a server node with env requirements and a package ref", async () => {
-    const src = JSON.stringify({ mcpServers: { veridex: { command: "npx", args: ["-y", "veridex-mcp"], env: { TOKEN: "x" } } } });
+    const src = JSON.stringify({ mcpServers: { rinnegan: { command: "npx", args: ["-y", "rinnegan-mcp"], env: { TOKEN: "x" } } } });
     const r = await parseFile(".mcp.json", src, "mcp");
-    const server = r.nodes.find((n) => n.qualifiedName === "server.veridex");
+    const server = r.nodes.find((n) => n.qualifiedName === "server.rinnegan");
     expect(server).toBeTruthy();
     expect(server!.docstring).toContain("TOKEN");
-    expect(r.nodes.some((n) => n.qualifiedName === "veridex-mcp" && n.filePath === "<packages>")).toBe(true);
+    expect(r.nodes.some((n) => n.qualifiedName === "rinnegan-mcp" && n.filePath === "<packages>")).toBe(true);
   });
 });

@@ -8,7 +8,7 @@
 
 </div>
 
-**Verifiable code-knowledge engine** (engine name: `veridex`). For any task, Rinnegan returns
+**Verifiable code-knowledge engine.** For any task, Rinnegan returns
 the *minimal, maximal-signal, provenance-tagged* slice of a codebase — the smallest set of
 facts an AI agent needs to write precise, hallucination-free code. Like the dōjutsu it's named
 for, it perceives every path: the whole symbol graph, every edge, and the blast radius of any
@@ -24,7 +24,7 @@ change — while marking exactly which facts are ground truth.
 - **Beats lost-in-the-middle.** Output is budgeted and position-ordered (highest signal
   at the context edges) so a fraction of a 1M window is more than enough.
 
-Surfaces: **library** (`Veridex`), **CLI** (`veridex understand <task>`), **MCP server**
+Surfaces: **library** (`Rinnegan`), **CLI** (`rinnegan understand <task>`), **MCP server**
 (single `understand` tool).
 
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the build plan.
@@ -34,9 +34,9 @@ See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for t
 ```bash
 npm install        # better-sqlite3 ships a prebuilt binary (Node 20+)
 npm run build
-node bin/veridex.js index            # build the SQLite knowledge graph
-node bin/veridex.js understand "how does X work"   # minimal provenance-tagged slice
-node bin/veridex.js mcp              # MCP server (single 'understand' tool)
+node bin/rinnegan.js index            # build the SQLite knowledge graph
+node bin/rinnegan.js understand "how does X work"   # minimal provenance-tagged slice
+node bin/rinnegan.js mcp              # MCP server (single 'understand' tool)
 ```
 
 Other commands: `search`, `deps <file>`, `refs <symbol> [--write|--read]`,
@@ -44,7 +44,7 @@ Other commands: `search`, `deps <file>`, `refs <symbol> [--write|--read]`,
 
 ## Purpose
 
-Veridex is **internal machinery for AI coding agents**, not a user-facing graph tool.
+Rinnegan is **internal machinery for AI coding agents**, not a user-facing graph tool.
 Its sole job: hand any attention-limited / sparse-attention model the *exact signal* it
 needs to make precise, no-nonsense edits to an existing codebase — and nothing else.
 
@@ -54,7 +54,7 @@ gets the shape first and the exact lines last:
 `DETAIL` (whitespace-minified, provenance-tagged source to edit). Deterministic — no LLM
 summarization (that is cognee's bloat; we reject it and keep only the multi-resolution idea).
 
-**Any agent.** `veridex install <agent>` emits MCP config for Claude Code, Cursor, Codex,
+**Any agent.** `rinnegan install <agent>` emits MCP config for Claude Code, Cursor, Codex,
 Kiro, Pi, Windsurf, Gemini. MCP stdio is the universal transport.
 
 ## Coverage (v0.1)

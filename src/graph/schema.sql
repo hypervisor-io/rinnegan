@@ -1,4 +1,4 @@
--- Veridex provenance graph schema. The verifiability columns on `edges`
+-- Rinnegan provenance graph schema. The verifiability columns on `edges`
 -- (provenance, confidence, resolver, read_write) are the heart of the design.
 
 CREATE TABLE IF NOT EXISTS nodes (

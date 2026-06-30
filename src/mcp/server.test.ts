@@ -2,19 +2,19 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Veridex } from "../index.js";
+import { Rinnegan } from "../index.js";
 import { buildTools } from "./server.js";
 
 describe("MCP tools", () => {
   let root: string;
-  let vx: Veridex;
+  let vx: Rinnegan;
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), "veridex-mcp-"));
+    root = mkdtempSync(join(tmpdir(), "rinnegan-mcp-"));
     writeFileSync(
       join(root, "auth.ts"),
       "export function login(u: string){ return validate(u) } function validate(u: string){ return u.length > 0 }",
     );
-    vx = Veridex.open(root, { dbPath: ":memory:" });
+    vx = Rinnegan.open(root, { dbPath: ":memory:" });
     await vx.indexAll();
   });
   afterAll(() => {

@@ -1,21 +1,21 @@
 import { Command } from "commander";
-import { Veridex } from "../index.js";
+import { Rinnegan } from "../index.js";
 import { VERSION } from "../version.js";
 
 type Out = (s: string) => void;
 
-function openIndexed(root: string): Veridex {
-  return Veridex.open(root);
+function openIndexed(root: string): Rinnegan {
+  return Rinnegan.open(root);
 }
 
-async function ensureIndexed(vx: Veridex): Promise<void> {
+async function ensureIndexed(vx: Rinnegan): Promise<void> {
   if (vx.stats().nodes === 0) await vx.indexAll();
 }
 
 /** Build the commander program. `out` and `cwd` are injectable for testing. */
 export function buildProgram(out: Out, cwd: string): Command {
   const program = new Command();
-  program.name("veridex").description("Verifiable code-knowledge engine").version(VERSION);
+  program.name("rinnegan").description("Verifiable code-knowledge engine").version(VERSION);
   program.option("--json", "machine-readable JSON output (for agents/scripts)");
   program.option("-C, --root <dir>", "project root to operate on (default: cwd)");
   const json = () => !!program.opts().json;
@@ -25,7 +25,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("index [path]")
     .description("Build/update the index")
     .action(async (path?: string) => {
-      const vx = Veridex.open(path ?? dir());
+      const vx = Rinnegan.open(path ?? dir());
       const stats = await vx.indexAll();
       out(json() ? JSON.stringify(stats) : `Indexed ${stats.parsed} file(s), ${stats.nodes} nodes, ${stats.edges} edges (${stats.skipped} unchanged).`);
       vx.close();
@@ -35,7 +35,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("status")
     .description("Show index statistics")
     .action(() => {
-      const vx = Veridex.open(dir());
+      const vx = Rinnegan.open(dir());
       const s = vx.stats();
       out(json() ? JSON.stringify(s) : `nodes=${s.nodes} edges=${s.edges} files=${s.files}`);
       vx.close();
@@ -124,11 +124,11 @@ export function buildProgram(out: Out, cwd: string): Command {
 
   program
     .command("install [agent]")
-    .description("Print MCP config to connect Veridex to a coding agent (claude-code, cursor, codex, kiro, pi, windsurf, gemini)")
+    .description("Print MCP config to connect Rinnegan to a coding agent (claude-code, cursor, codex, kiro, pi, windsurf, gemini)")
     .action(async (agent?: string) => {
       const { renderInstall } = await import("../mcp/install.js");
-      // prefer a global `veridex` binary; fall back to this entry's absolute path
-      const cmd = process.env.VERIDEX_BIN ?? "veridex";
+      // prefer a global `rinnegan` binary; fall back to this entry's absolute path
+      const cmd = process.env.RINNEGAN_BIN ?? "rinnegan";
       out(renderInstall(agent, cmd, ["mcp"]));
     });
 
@@ -149,7 +149,7 @@ export async function runCli(argv: string[], out: Out = console.log, cwd: string
 }
 
 // Entry when executed directly.
-const invokedDirectly = process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js") || process.argv[1]?.endsWith("veridex.js");
+const invokedDirectly = process.argv[1]?.endsWith("main.ts") || process.argv[1]?.endsWith("main.js") || process.argv[1]?.endsWith("rinnegan.js");
 if (invokedDirectly) {
   runCli(process.argv.slice(2)).catch((e) => {
     console.error(e instanceof Error ? e.message : String(e));

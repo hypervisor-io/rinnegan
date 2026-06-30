@@ -7,7 +7,7 @@ import { runCli } from "./main.js";
 describe("CLI", () => {
   let root: string;
   beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), "veridex-cli-"));
+    root = mkdtempSync(join(tmpdir(), "rinnegan-cli-"));
     writeFileSync(
       join(root, "auth.ts"),
       "export function login(u: string){ return validate(u) } function validate(u: string){ return u.length > 0 }",

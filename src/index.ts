@@ -11,12 +11,12 @@ export type { GraphNode, GraphEdge, Provenance, ReadWrite, NodeKind, EdgeKind } 
 export type { IndexStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
 
-export interface VeridexOpts {
+export interface RinneganOpts {
   dbPath?: string;
 }
 
-/** The Veridex public API — the shared core behind the CLI and MCP server. */
-export class Veridex {
+/** The Rinnegan public API — the shared core behind the CLI and MCP server. */
+export class Rinnegan {
   private semantic: SemanticEngine | null = null;
 
   private constructor(
@@ -24,9 +24,9 @@ export class Veridex {
     private store: GraphStore,
   ) {}
 
-  static open(root: string, opts: VeridexOpts = {}): Veridex {
-    const dbPath = opts.dbPath ?? join(root, ".veridex", "graph.db");
-    return new Veridex(root, GraphStore.open(dbPath));
+  static open(root: string, opts: RinneganOpts = {}): Rinnegan {
+    const dbPath = opts.dbPath ?? join(root, ".rinnegan", "graph.db");
+    return new Rinnegan(root, GraphStore.open(dbPath));
   }
 
   async indexAll(): Promise<IndexStats> {

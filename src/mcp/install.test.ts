@@ -8,20 +8,20 @@ describe("MCP install snippets", () => {
   });
 
   it("renders a valid JSON block for cursor", () => {
-    const out = renderInstall("cursor", "veridex", ["mcp"]);
+    const out = renderInstall("cursor", "rinnegan", ["mcp"]);
     const json = out.slice(out.indexOf("{"));
     const parsed = JSON.parse(json);
-    expect(parsed.mcpServers.veridex.command).toBe("veridex");
-    expect(parsed.mcpServers.veridex.args).toEqual(["mcp"]);
+    expect(parsed.mcpServers.rinnegan.command).toBe("rinnegan");
+    expect(parsed.mcpServers.rinnegan.args).toEqual(["mcp"]);
   });
 
   it("renders TOML for codex and a command for claude-code", () => {
-    expect(renderInstall("codex", "veridex", ["mcp"])).toContain("[mcp_servers.veridex]");
-    expect(renderInstall("claude-code", "veridex", ["mcp"])).toContain("claude mcp add veridex");
+    expect(renderInstall("codex", "rinnegan", ["mcp"])).toContain("[mcp_servers.rinnegan]");
+    expect(renderInstall("claude-code", "rinnegan", ["mcp"])).toContain("claude mcp add rinnegan");
   });
 
   it("lists all agents when none specified", () => {
-    const out = renderInstall(undefined, "veridex", ["mcp"]);
+    const out = renderInstall(undefined, "rinnegan", ["mcp"]);
     expect(out).toContain("Cursor");
     expect(out).toContain("Codex");
   });

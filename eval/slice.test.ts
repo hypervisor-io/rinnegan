@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Veridex } from "../src/index.js";
+import { Rinnegan } from "../src/index.js";
 
 const corpus = join(dirname(fileURLToPath(import.meta.url)), "corpus");
 
 describe("slice-quality gates", () => {
-  let vx: Veridex;
+  let vx: Rinnegan;
   beforeAll(async () => {
-    vx = Veridex.open(corpus, { dbPath: ":memory:" });
+    vx = Rinnegan.open(corpus, { dbPath: ":memory:" });
     await vx.indexAll();
   });
   afterAll(() => vx.close());

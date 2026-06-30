@@ -1,5 +1,5 @@
 /**
- * MCP registration snippets for the major coding agents. Veridex speaks MCP stdio,
+ * MCP registration snippets for the major coding agents. Rinnegan speaks MCP stdio,
  * which every major agent supports; only the config file/format differs. We EMIT
  * ready-to-paste config (non-destructive) rather than silently editing global files.
  */
@@ -13,7 +13,7 @@ export interface InstallTarget {
 }
 
 const jsonBlock = (cmd: string, args: string[]): string =>
-  JSON.stringify({ mcpServers: { veridex: { command: cmd, args } } }, null, 2);
+  JSON.stringify({ mcpServers: { rinnegan: { command: cmd, args } } }, null, 2);
 
 export const TARGETS: InstallTarget[] = [
   {
@@ -21,7 +21,7 @@ export const TARGETS: InstallTarget[] = [
     name: "Claude Code",
     configPath: "project .mcp.json  (or run the command)",
     format: "command",
-    render: (cmd, args) => `claude mcp add veridex -- ${cmd} ${args.join(" ")}\n\n# or add to .mcp.json:\n${jsonBlock(cmd, args)}`,
+    render: (cmd, args) => `claude mcp add rinnegan -- ${cmd} ${args.join(" ")}\n\n# or add to .mcp.json:\n${jsonBlock(cmd, args)}`,
   },
   {
     id: "cursor",
@@ -43,14 +43,14 @@ export const TARGETS: InstallTarget[] = [
     configPath: "~/.codex/config.toml",
     format: "toml",
     render: (cmd, args) =>
-      `[mcp_servers.veridex]\ncommand = "${cmd}"\nargs = [${args.map((a) => `"${a}"`).join(", ")}]`,
+      `[mcp_servers.rinnegan]\ncommand = "${cmd}"\nargs = [${args.map((a) => `"${a}"`).join(", ")}]`,
   },
   {
     id: "kiro",
     name: "Kiro",
     configPath: ".kiro/settings/mcp.json  (or run the command)",
     format: "command",
-    render: (cmd, args) => `kiro-cli mcp add --name veridex -- ${cmd} ${args.join(" ")}\n\n# or .kiro/settings/mcp.json:\n${jsonBlock(cmd, args)}`,
+    render: (cmd, args) => `kiro-cli mcp add --name rinnegan -- ${cmd} ${args.join(" ")}\n\n# or .kiro/settings/mcp.json:\n${jsonBlock(cmd, args)}`,
   },
   {
     id: "pi",

@@ -2,18 +2,18 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Veridex } from "../index.js";
+import { Rinnegan } from "../index.js";
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "veridex-watch-"));
+  root = mkdtempSync(join(tmpdir(), "rinnegan-watch-"));
   writeFileSync(join(root, "a.ts"), `export function alpha(){ return 1 }`);
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("incremental reindex", () => {
   it("reindexFile picks up a new symbol after an edit", async () => {
-    const vx = Veridex.open(root, { dbPath: ":memory:" });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
     await vx.indexAll();
     expect(vx.search("beta").length).toBe(0);
 
@@ -25,7 +25,7 @@ describe("incremental reindex", () => {
   });
 
   it("reindexFile removes symbols when the file is deleted", async () => {
-    const vx = Veridex.open(root, { dbPath: ":memory:" });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
     await vx.indexAll();
     rmSync(join(root, "a.ts"));
     const r = await vx.reindexFile("a.ts");

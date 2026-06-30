@@ -7,7 +7,7 @@ import { scanFiles, contentHash } from "./scanner.js";
 let root: string;
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), "veridex-scan-"));
+  root = mkdtempSync(join(tmpdir(), "rinnegan-scan-"));
   writeFileSync(join(root, "a.ts"), "export const a = 1;");
   writeFileSync(join(root, "b.py"), "x = 1");
   writeFileSync(join(root, "vendor.min.js"), "var z=1");

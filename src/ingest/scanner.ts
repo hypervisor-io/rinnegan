@@ -23,7 +23,7 @@ export const LANG_EXT: Record<string, string> = {
 
 const IGNORE_DIRS = new Set([
   "node_modules", ".git", "dist", "build", "out", "vendor", "target",
-  ".veridex", "coverage", ".next", ".nuxt", ".cache", "__pycache__",
+  ".rinnegan", "coverage", ".next", ".nuxt", ".cache", "__pycache__",
 ]);
 
 const MAX_BYTES = 1_000_000;

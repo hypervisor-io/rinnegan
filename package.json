@@ -1,10 +1,10 @@
 {
-  "name": "veridex",
+  "name": "rinnegan",
   "version": "0.1.0",
   "description": "Verifiable code-knowledge engine — minimal, provenance-tagged signal slices for AI agents. Deterministic, no neural embeddings.",
   "type": "module",
   "bin": {
-    "veridex": "./bin/veridex.js"
+    "rinnegan": "./bin/rinnegan.js"
   },
   "exports": {
     ".": "./dist/index.js"

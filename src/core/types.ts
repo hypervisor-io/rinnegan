@@ -10,7 +10,7 @@ export type EdgeKind =
   | "references" | "type_of" | "returns" | "instantiates" | "overrides" | "decorates";
 
 /**
- * Provenance is the heart of Veridex: every edge declares HOW it was derived,
+ * Provenance is the heart of Rinnegan: every edge declares HOW it was derived,
  * so an agent never mistakes a guess for ground truth.
  */
 export type Provenance =

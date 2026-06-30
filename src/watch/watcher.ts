@@ -4,7 +4,7 @@ import { GraphStore } from "../graph/store.js";
 import { Indexer } from "../index/indexer.js";
 
 const IGNORE_SEG = new Set([
-  "node_modules", ".git", "dist", "build", "out", "vendor", "target", ".veridex",
+  "node_modules", ".git", "dist", "build", "out", "vendor", "target", ".rinnegan",
   "coverage", ".next", "__pycache__",
 ]);
 

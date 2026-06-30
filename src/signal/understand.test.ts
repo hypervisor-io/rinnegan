@@ -28,7 +28,7 @@ describe("understand", () => {
   let semantic: SemanticEngine;
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), "veridex-und-"));
+    root = mkdtempSync(join(tmpdir(), "rinnegan-und-"));
     writeFileSync(
       join(root, "auth.ts"),
       [
@@ -82,7 +82,7 @@ describe("harmonic multi-resolution", () => {
   let hstore: GraphStore;
   let hsem: SemanticEngine;
   beforeAll(async () => {
-    hroot = mkdtempSync(join(tmpdir(), "veridex-harm-"));
+    hroot = mkdtempSync(join(tmpdir(), "rinnegan-harm-"));
     writeFileSync(join(hroot, "auth.ts"), [
       "export function login(username: string) {",
       "  const ok = validateCredentials(username);",

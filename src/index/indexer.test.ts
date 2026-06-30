@@ -8,7 +8,7 @@ import { Indexer } from "./indexer.js";
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "veridex-idx-"));
+  root = mkdtempSync(join(tmpdir(), "rinnegan-idx-"));
   writeFileSync(join(root, "auth.ts"), `export function login(user: string){ return validate(user) } function validate(u: string){ return u.length > 0 }`);
   writeFileSync(join(root, "main.ts"), `function run(){ const r = 1; return r }`);
 });
@@ -27,7 +27,7 @@ describe("Indexer", () => {
   });
 
   it("two-gate incremental: re-run with no changes does zero reparse", async () => {
-    const dbPath = join(root, ".veridex", "graph.db");
+    const dbPath = join(root, ".rinnegan", "graph.db");
     const s1 = GraphStore.open(dbPath);
     await new Indexer(s1).indexAll(root);
     s1.close();
