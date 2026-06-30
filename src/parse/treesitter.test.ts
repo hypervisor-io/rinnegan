@@ -72,6 +72,22 @@ describe("extended grammars", () => {
   });
 });
 
+describe("bash", () => {
+  const src = ["greet() {", "  echo hi", "}", "greet", "ls -la"].join("\n");
+  it("extracts function defs", async () => {
+    const r = await parseFile("a.sh", src, "bash");
+    expect(r.nodes.some((n) => n.qualifiedName === "greet" && n.kind === "function")).toBe(true);
+  });
+  it("resolves an in-file command invocation (ast_exact) and marks externals unresolved", async () => {
+    const r = await parseFile("a.sh", src, "bash");
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    expect(call).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === call!.target)?.qualifiedName).toBe("greet");
+    // `ls` is not a function defined in-file → honest unresolved boundary
+    expect(r.edges.some((e) => e.kind === "calls" && e.provenance === "unresolved")).toBe(true);
+  });
+});
+
 describe("objective-c", () => {
   const src = [
     "@interface Foo : NSObject",

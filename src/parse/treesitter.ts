@@ -26,6 +26,7 @@ const WASM: Record<string, string> = {
   lua: "tree-sitter-lua",
   solidity: "tree-sitter-solidity",
   objc: "tree-sitter-objc",
+  bash: "tree-sitter-bash",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -365,6 +366,14 @@ export const SPECS: Record<string, LangConfig> = {
     ],
     calls: [{ type: "message_expression", fnField: "method" }],
     identType: "identifier",
+    selectorTypes: [],
+  },
+  bash: {
+    // shell "calls" are commands; a command_name matching an in-file function resolves.
+    // identType is command_name (not a bare word) so the `name` field node matches directly.
+    defs: [{ type: "function_definition", kind: "function" }],
+    calls: [{ type: "command", fnField: "name" }],
+    identType: "command_name",
     selectorTypes: [],
   },
 };

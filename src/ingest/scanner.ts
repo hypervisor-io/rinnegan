@@ -14,6 +14,7 @@ export const LANG_EXT: Record<string, string> = {
   ".swift": "swift", ".kt": "kotlin", ".kts": "kotlin", ".scala": "scala",
   ".zig": "zig", ".lua": "lua", ".sol": "solidity",
   ".m": "objc", ".mm": "objc",
+  ".sh": "bash", ".bash": "bash",
 };
 
 const IGNORE_DIRS = new Set([
