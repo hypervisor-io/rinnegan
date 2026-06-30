@@ -49,9 +49,17 @@ Kiro, Pi, Windsurf, Gemini. MCP stdio is the universal transport.
 
 ## Coverage (v0.1)
 
-**Code — 16 languages.** TS/JS (compiler API, type-aware method resolution) + Python,
-Go, Rust, Java, PHP, C#, Ruby, C, C++, Swift, Kotlin, Scala, Zig, Lua, Solidity
-(tree-sitter, verified spec registry — adding a grammar is one table entry).
+**Code — 23 languages.** TS/JS (compiler API, type-aware method resolution) + Python,
+Go, Rust, Java, PHP, C#, Ruby, C, C++, Swift, Kotlin, Scala, Zig, Lua, Solidity,
+Objective-C, Bash, OCaml, ReScript (tree-sitter, verified spec registry — adding a
+grammar is one table entry), plus **Elixir** (def/defmodule macros parsed as call nodes)
+and **Terraform/HCL** (block defs + `var.*`/resource/module traversal references) via
+bespoke extractors. The Terraform grammar is vendored under `vendor/wasm/` (ABI-compatible,
+not in tree-sitter-wasms).
+
+**Composite SFCs — Vue / Svelte / Astro.** The `<script>` block is sliced out textually,
+parsed with the precise TS/JS extractor, and line numbers are remapped back to the original
+`.vue/.svelte/.astro` file — one code path, no SFC grammar required.
 
 **Non-code.**
 - **Docs** (`.md/.mdx/.rst/.txt`): markdown links + `[[wikilinks]]` → `references` edges between docs.
@@ -60,11 +68,12 @@ Go, Rust, Java, PHP, C#, Ruby, C, C++, Swift, Kotlin, Scala, Zig, Lua, Solidity
 - **MCP configs** (`.mcp.json/mcp.json/claude_desktop_config.json`): server nodes with
   command/args/env requirements + package refs.
 
-**Deferred (need extra work, not in the tree-sitter-wasms pack):** Terraform/HCL (external
-grammar), composite Vue/Svelte/Astro (script preprocess), Dart (grammar ABI mismatch),
-Elixir/Obj-C (macro/mixed), Fortran/Pascal/Julia/PowerShell/Verilog (no grammar in pack).
+**Skipped, with reason (verified by probe, never assumed):** Dart (grammar is ABI v15;
+web-tree-sitter runtime supports 13–14 — no compatible build sourced); YAML/Elm/QL (wasm
+fails to load under the runtime); CSS/HTML/JSON/TOML (load fine, but no clean def/call model
+beyond what the manifest/MCP extractors already cover).
 
-## Status — Phase 1–6 (v0.1), 66 tests
+## Status — Phase 1–7 (v0.1), 80 tests
 
 ## Status — earlier note, Phase 1–5
 
