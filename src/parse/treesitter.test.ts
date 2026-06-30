@@ -72,6 +72,28 @@ describe("extended grammars", () => {
   });
 });
 
+describe("ocaml", () => {
+  const src = "let add a b = a + b\nlet run () = add 1 2";
+  it("extracts let-bindings and resolves an application (ast_exact)", async () => {
+    const r = await parseFile("a.ml", src, "ocaml");
+    expect(r.nodes.some((n) => n.qualifiedName === "add")).toBe(true);
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    expect(call).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === call!.target)?.qualifiedName).toBe("add");
+  });
+});
+
+describe("rescript", () => {
+  const src = "let add = (a, b) => a + b\nlet run = () => add(1, 2)";
+  it("extracts let-bindings and resolves a call (ast_exact)", async () => {
+    const r = await parseFile("a.res", src, "rescript");
+    expect(r.nodes.some((n) => n.qualifiedName === "add")).toBe(true);
+    const call = r.edges.find((e) => e.kind === "calls" && e.provenance === "ast_exact");
+    expect(call).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === call!.target)?.qualifiedName).toBe("add");
+  });
+});
+
 describe("bash", () => {
   const src = ["greet() {", "  echo hi", "}", "greet", "ls -la"].join("\n");
   it("extracts function defs", async () => {

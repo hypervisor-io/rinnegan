@@ -27,6 +27,8 @@ const WASM: Record<string, string> = {
   solidity: "tree-sitter-solidity",
   objc: "tree-sitter-objc",
   bash: "tree-sitter-bash",
+  ocaml: "tree-sitter-ocaml",
+  rescript: "tree-sitter-rescript",
 };
 
 async function getParser(language: string): Promise<Parser> {
@@ -71,7 +73,7 @@ export interface LangConfig {
   selectorTypes: string[];
 }
 
-const NAMEISH = /^(identifier|simple_identifier|type_identifier|name|word)$/;
+const NAMEISH = /^(identifier|simple_identifier|type_identifier|name|word|value_name|value_identifier)$/;
 
 /** Descend declarators (c/c++) to the first identifier/field_identifier. */
 function descendName(n: TsNode): TsNode | null {
@@ -374,6 +376,21 @@ export const SPECS: Record<string, LangConfig> = {
     defs: [{ type: "function_definition", kind: "function" }],
     calls: [{ type: "command", fnField: "name" }],
     identType: "command_name",
+    selectorTypes: [],
+  },
+  ocaml: {
+    // let-bindings nest the name as a value_name child; firstIdent picks it.
+    // application_expression.function is a value_path; identType=value_path lets
+    // a simple `add` resolve while qualified `Mod.add` falls to a boundary.
+    defs: [{ type: "let_binding", kind: "function", nameStrategy: "firstIdent" }],
+    calls: [{ type: "application_expression", fnField: "function" }],
+    identType: "value_path",
+    selectorTypes: [],
+  },
+  rescript: {
+    defs: [{ type: "let_binding", kind: "function", nameStrategy: "firstIdent" }],
+    calls: [{ type: "call_expression", fnField: "function" }],
+    identType: "value_identifier",
     selectorTypes: [],
   },
 };

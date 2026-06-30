@@ -15,6 +15,7 @@ export const LANG_EXT: Record<string, string> = {
   ".zig": "zig", ".lua": "lua", ".sol": "solidity",
   ".m": "objc", ".mm": "objc",
   ".sh": "bash", ".bash": "bash",
+  ".ml": "ocaml", ".mli": "ocaml", ".res": "rescript", ".resi": "rescript",
 };
 
 const IGNORE_DIRS = new Set([
