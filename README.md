@@ -1,8 +1,18 @@
-# Veridex
+<div align="center">
 
-**Verifiable code-knowledge engine.** For any task, Veridex returns the *minimal,
-maximal-signal, provenance-tagged* slice of a codebase — the smallest set of facts an
-AI agent needs to write precise, hallucination-free code.
+<img src="docs/branding/rinnegan.png" alt="Rinnegan — the all-seeing eye for your codebase" width="420" />
+
+# Rinnegan
+
+**The all-seeing eye for your codebase.**
+
+</div>
+
+**Verifiable code-knowledge engine** (engine name: `veridex`). For any task, Rinnegan returns
+the *minimal, maximal-signal, provenance-tagged* slice of a codebase — the smallest set of
+facts an AI agent needs to write precise, hallucination-free code. Like the dōjutsu it's named
+for, it perceives every path: the whole symbol graph, every edge, and the blast radius of any
+change — while marking exactly which facts are ground truth.
 
 - **Deterministic.** No neural embeddings, no AI tokenization, no external API. Same
   corpus ⇒ byte-identical index and output.
