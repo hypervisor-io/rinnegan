@@ -4,13 +4,8 @@ import { VERSION } from "../version.js";
 
 type Out = (s: string) => void;
 
-function openIndexed(cwd: string): Veridex {
-  const vx = Veridex.open(cwd);
-  if (vx.stats().nodes === 0) {
-    // synchronous-ish: index lazily on first use
-    return vx;
-  }
-  return vx;
+function openIndexed(root: string): Veridex {
+  return Veridex.open(root);
 }
 
 async function ensureIndexed(vx: Veridex): Promise<void> {
@@ -21,14 +16,16 @@ async function ensureIndexed(vx: Veridex): Promise<void> {
 export function buildProgram(out: Out, cwd: string): Command {
   const program = new Command();
   program.name("veridex").description("Verifiable code-knowledge engine").version(VERSION);
-  const json = () => !!program.opts().json;
   program.option("--json", "machine-readable JSON output (for agents/scripts)");
+  program.option("-C, --root <dir>", "project root to operate on (default: cwd)");
+  const json = () => !!program.opts().json;
+  const dir = (): string => (program.opts().root as string | undefined) ?? cwd;
 
   program
     .command("index [path]")
     .description("Build/update the index")
     .action(async (path?: string) => {
-      const vx = Veridex.open(path ?? cwd);
+      const vx = Veridex.open(path ?? dir());
       const stats = await vx.indexAll();
       out(json() ? JSON.stringify(stats) : `Indexed ${stats.parsed} file(s), ${stats.nodes} nodes, ${stats.edges} edges (${stats.skipped} unchanged).`);
       vx.close();
@@ -38,7 +35,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("status")
     .description("Show index statistics")
     .action(() => {
-      const vx = Veridex.open(cwd);
+      const vx = Veridex.open(dir());
       const s = vx.stats();
       out(json() ? JSON.stringify(s) : `nodes=${s.nodes} edges=${s.edges} files=${s.files}`);
       vx.close();
@@ -49,7 +46,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .description("Return the minimal, provenance-tagged signal slice for a task")
     .option("-b, --budget <n>", "token budget", "6000")
     .action(async (task: string[], opts: { budget: string }) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const res = vx.understand(task.join(" "), { tokenBudget: Number(opts.budget) });
       out(json() ? JSON.stringify({ tokensEstimate: res.tokensEstimate, anchors: res.anchors, text: res.text }) : res.text);
@@ -60,7 +57,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("search <query...>")
     .description("Symbol search (FTS/BM25)")
     .action(async (query: string[]) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const hits = vx.search(query.join(" "), 20);
       out(json() ? JSON.stringify(hits) : hits.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}  [${n.kind}]`).join("\n"));
@@ -71,7 +68,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("deps <file>")
     .description("File-scoped dependency query")
     .action(async (file: string) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const d = vx.deps(file);
       out(json() ? JSON.stringify(d) : d.dependencies.map((x) => `${x.name}  [${x.provenance}/${x.kind}]`).join("\n") || "(none)");
@@ -84,7 +81,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .option("--write", "writes only")
     .option("--read", "reads only")
     .action(async (symbol: string, opts: { write?: boolean; read?: boolean }) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const rw = opts.write ? "write" : opts.read ? "read" : undefined;
       const refs = vx.refs(symbol, rw ? { readWrite: rw } : {});
@@ -96,7 +93,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("callers <symbol>")
     .description("Functions that call a symbol")
     .action(async (symbol: string) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const c = vx.callers(symbol);
       out(json() ? JSON.stringify(c) : c.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)");
@@ -107,7 +104,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("impact <symbol>")
     .description("Blast radius of changing a symbol")
     .action(async (symbol: string) => {
-      const vx = openIndexed(cwd);
+      const vx = openIndexed(dir());
       await ensureIndexed(vx);
       const i = vx.impact(symbol);
       out(json() ? JSON.stringify(i) : i.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)");
@@ -119,7 +116,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .description("Start the MCP server over stdio (single 'understand' tool)")
     .action(async () => {
       const { runMcp } = await import("../mcp/server.js");
-      await runMcp(cwd);
+      await runMcp(dir());
     });
 
   return program;
