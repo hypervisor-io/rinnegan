@@ -39,3 +39,31 @@ function main(){
     expect(r.nodes.find((n) => n.id === u!.target)?.kind).toBe("unresolved");
   });
 });
+
+describe("type-aware method resolution", () => {
+  it("resolves new X().method() and this.method() to the class method (ast_inferred)", async () => {
+    const src = [
+      "class Repo {",
+      "  find(){ return 1 }",
+      "  save(){ return this.find() }",
+      "}",
+      "function use(){ const r = new Repo(); return r.find(); }",
+    ].join("\n");
+    const r = await parseFile("a.ts", src, "typescript");
+    const typed = r.edges.filter((e) => e.kind === "calls" && e.resolver === "ts-type" && e.provenance === "ast_inferred");
+    expect(typed.length).toBeGreaterThanOrEqual(2); // r.find() and this.find()
+    const target = r.nodes.find((n) => n.id === typed[0].target);
+    expect(target?.qualifiedName).toBe("Repo.find");
+  });
+
+  it("resolves a typed parameter's method call", async () => {
+    const src = [
+      "class Svc { run(){ return 1 } }",
+      "function go(s: Svc){ return s.run() }",
+    ].join("\n");
+    const r = await parseFile("a.ts", src, "typescript");
+    const typed = r.edges.find((e) => e.resolver === "ts-type" && e.provenance === "ast_inferred");
+    expect(typed).toBeTruthy();
+    expect(r.nodes.find((n) => n.id === typed!.target)?.qualifiedName).toBe("Svc.run");
+  });
+});

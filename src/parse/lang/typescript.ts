@@ -70,6 +70,25 @@ export function extractTypeScript(path: string, source: string, language: string
   const nodeScope = new Map<ts.Node, Scope>([[sf, rootScope]]);
   const cur = () => scopeStack[scopeStack.length - 1];
 
+  // type-aware method resolution state
+  const classMethods = new Map<string, Map<string, string>>(); // className -> methodName -> nodeId
+  const varType = new Map<string, string>(); // variable/param nodeId -> className
+
+  function typeNameFromTypeNode(t: ts.TypeNode | undefined): string | undefined {
+    if (t && ts.isTypeReferenceNode(t) && ts.isIdentifier(t.typeName)) return t.typeName.text;
+    return undefined;
+  }
+  function inferType(n: ts.Node): string | undefined {
+    if (ts.isVariableDeclaration(n)) {
+      if (n.type) return typeNameFromTypeNode(n.type);
+      if (n.initializer && ts.isNewExpression(n.initializer) && ts.isIdentifier(n.initializer.expression)) {
+        return n.initializer.expression.text;
+      }
+    }
+    if (ts.isParameter(n) && n.type) return typeNameFromTypeNode(n.type);
+    return undefined;
+  }
+
   function signatureOf(n: ts.Node): string {
     const txt = n.getText(sf);
     const brace = txt.indexOf("{");
@@ -122,8 +141,23 @@ export function extractTypeScript(path: string, source: string, language: string
         source: cur().ownerId, target: id, kind: "contains", line: lineOf(n.getStart(sf)),
         col: colOf(n.getStart(sf)), provenance: "ast_exact", confidence: 1, resolver: "ts-scope",
       });
+      if (d.kind === "method") {
+        const parts = fqn.split(".");
+        const m = parts.pop()!;
+        const cls = parts.join(".");
+        let mm = classMethods.get(cls);
+        if (!mm) classMethods.set(cls, (mm = new Map()));
+        mm.set(m, id);
+      } else {
+        const ty = inferType(n);
+        if (ty) varType.set(id, ty);
+      }
+
       if (functionLike(n)) {
         ownerForNode.set(n, id);
+        nameStack.push(d.name);
+        pushedName = true;
+      } else if (ts.isClassDeclaration(n)) {
         nameStack.push(d.name);
         pushedName = true;
       } else if (ts.isVariableDeclaration(n) && n.initializer && functionLike(n.initializer)) {
@@ -191,8 +225,9 @@ export function extractTypeScript(path: string, source: string, language: string
   }
 
   // ---- Pass B: calls + references (scope threaded via traversal, O(1) lookups) ----
-  function visitB(n: ts.Node, scope: Scope): void {
+  function visitB(n: ts.Node, scope: Scope, classCtx: string | null): void {
     const here = nodeScope.get(n) ?? scope;
+    const childClass = ts.isClassDeclaration(n) && n.name ? n.name.text : classCtx;
     // calls
     if (ts.isCallExpression(n)) {
       const callee = n.expression;
@@ -208,9 +243,22 @@ export function extractTypeScript(path: string, source: string, language: string
           pushEdge({ source: owner, target: ensureUnresolved(callee.text, line, col), kind: "calls", line, col, provenance: "unresolved", confidence: 0, resolver: "ts-scope", readWrite: "call", metadata: { boundary: "unresolved-callee" } });
         }
       } else if (ts.isPropertyAccessExpression(callee)) {
-        // a.b() — static path ends here unless we can resolve the receiver type (Phase 5)
-        unresolved++;
-        pushEdge({ source: owner, target: ensureUnresolved(callee.name.text, line, col), kind: "calls", line, col, provenance: "unresolved", confidence: 0, resolver: "ts-scope", readWrite: "call", metadata: { boundary: "dynamic-dispatch", receiver: callee.expression.getText(sf).slice(0, 40) } });
+        // a.b() — resolve via receiver type (new X / annotation / this)
+        const methodName = callee.name.text;
+        const recv = callee.expression;
+        let className: string | undefined;
+        if (recv.kind === ts.SyntaxKind.ThisKeyword) className = classCtx ?? undefined;
+        else if (ts.isIdentifier(recv)) {
+          const d = lookup(here, recv.text);
+          if (d) className = varType.get(d.id);
+        }
+        const targetId = className ? classMethods.get(className)?.get(methodName) : undefined;
+        if (targetId) {
+          pushEdge({ source: owner, target: targetId, kind: "calls", line, col, provenance: "ast_inferred", confidence: 0.85, resolver: "ts-type", readWrite: "call", metadata: { receiverType: className } });
+        } else {
+          unresolved++;
+          pushEdge({ source: owner, target: ensureUnresolved(methodName, line, col), kind: "calls", line, col, provenance: "unresolved", confidence: 0, resolver: "ts-type", readWrite: "call", metadata: { boundary: "dynamic-dispatch", receiver: recv.getText(sf).slice(0, 40) } });
+        }
       }
     }
 
@@ -240,9 +288,9 @@ export function extractTypeScript(path: string, source: string, language: string
       }
     }
 
-    ts.forEachChild(n, (c) => visitB(c, here));
+    ts.forEachChild(n, (c) => visitB(c, here, childClass));
   }
-  visitB(sf, rootScope);
+  visitB(sf, rootScope, null);
 
   return { nodes, edges, unresolved, imports };
 }
