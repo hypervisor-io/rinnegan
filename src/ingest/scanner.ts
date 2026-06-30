@@ -36,8 +36,19 @@ function isMinified(name: string): boolean {
   return /\.(min|bundle)\.(js|css|mjs|cjs)$/.test(name) || /\.min\./.test(name);
 }
 
-function languageOf(path: string): string | undefined {
-  return LANG_EXT[extname(path).toLowerCase()];
+const DOC_EXT = new Set([".md", ".mdx", ".markdown", ".rst", ".txt"]);
+const MANIFEST_FILES = new Set(["package.json", "go.mod", "pyproject.toml", "pom.xml", "cargo.toml", "apm.yml"]);
+
+/** Special files matched by name (manifests, MCP configs) plus docs and code by extension. */
+export function languageOf(path: string): string | undefined {
+  const base = basename(path).toLowerCase();
+  if (MANIFEST_FILES.has(base)) return "manifest";
+  if (base === "mcp.json" || base.endsWith(".mcp.json") || base === "mcp_servers.json" || base === "claude_desktop_config.json") {
+    return "mcp";
+  }
+  const ext = extname(path).toLowerCase();
+  if (DOC_EXT.has(ext)) return "markdown";
+  return LANG_EXT[ext];
 }
 
 function accept(absPath: string, size: number): string | undefined {

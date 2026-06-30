@@ -1,6 +1,9 @@
 import type { GraphNode, GraphEdge } from "../core/types.js";
 import { extractTypeScript } from "./lang/typescript.js";
 import { extractTreeSitter, SPECS } from "./treesitter.js";
+import { extractDocs } from "./special/docs.js";
+import { extractManifest } from "./special/manifests.js";
+import { extractMcp } from "./special/mcp_config.js";
 
 export interface ImportRef {
   localName: string;
@@ -30,6 +33,12 @@ export async function parseFile(
     case "typescript":
     case "javascript":
       return extractTypeScript(path, source, language);
+    case "markdown":
+      return extractDocs(path, source, language);
+    case "manifest":
+      return extractManifest(path, source, language);
+    case "mcp":
+      return extractMcp(path, source, language);
     default:
       if (SPECS[language]) return extractTreeSitter(path, source, language, SPECS[language]);
       return { nodes: [], edges: [], unresolved: 0, imports: [] };
