@@ -114,6 +114,14 @@ export function buildProgram(out: Out, cwd: string): Command {
       vx.close();
     });
 
+  program
+    .command("mcp")
+    .description("Start the MCP server over stdio (single 'understand' tool)")
+    .action(async () => {
+      const { runMcp } = await import("../mcp/server.js");
+      await runMcp(cwd);
+    });
+
   return program;
 }
 
