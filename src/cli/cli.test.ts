@@ -196,6 +196,26 @@ describe("CLI", () => {
     expect(m.domains.every((d: { topSymbols: unknown[] }) => Array.isArray(d.topSymbols))).toBe(true);
   });
 
+  it("docs --stale lists inline-code mentions that no longer match a symbol; plain docs prints a usage hint", async () => {
+    const dir = fixture({
+      "src/api.ts": "export function realFn() { return 1; }",
+      "docs/x.md": "Use `realFn` and `goneFn` for tasks.",
+    });
+    await runCli(["index"], () => {}, dir);
+
+    const lines: string[] = [];
+    await runCli(["docs", "--stale"], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toContain("docs/x.md:1  mentions 'goneFn' — no such symbol");
+
+    const jsonLines: string[] = [];
+    await runCli(["--json", "docs", "--stale"], (s) => jsonLines.push(s), dir);
+    expect(JSON.parse(jsonLines.join(""))).toEqual([{ docPath: "docs/x.md", line: 1, name: "goneFn" }]);
+
+    const hintLines: string[] = [];
+    await runCli(["docs"], (s) => hintLines.push(s), dir);
+    expect(hintLines.join("\n")).toContain("--stale");
+  });
+
   it("verify --staged reads the git index directly (edited + deleted files)", async () => {
     const dir = fixture({});
     execFileSync("git", ["init", "-q"], { cwd: dir });

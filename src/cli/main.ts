@@ -201,6 +201,26 @@ export function buildProgram(out: Out, cwd: string): Command {
     });
 
   program
+    .command("docs")
+    .description("Doc-mention checks against the graph")
+    .option("--stale", "list inline-code doc mentions with no matching symbol")
+    .action(async (opts: { stale?: boolean }) => {
+      if (!opts.stale) {
+        out("rinnegan docs --stale   # list doc mentions that no longer match any symbol (only mode for now)");
+        return;
+      }
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      const rows = vx.staleDocs();
+      out(
+        json()
+          ? JSON.stringify(rows)
+          : rows.map((r) => `${r.docPath}:${r.line}  mentions '${r.name}' — no such symbol`).join("\n") || "(none)",
+      );
+      vx.close();
+    });
+
+  program
     .command("map")
     .description("Architecture map: domains, entrypoints, top symbols, inter-domain dependencies")
     .option("--mermaid", "render as a mermaid flowchart instead of markdown")

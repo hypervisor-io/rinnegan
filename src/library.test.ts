@@ -1,15 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { Rinnegan, freshnessStamp, renderLookup } from "./index.js";
 
 const fixtureDirs: string[] = [];
 
-/** Fresh temp dir seeded with the given relative-path → content files. */
+/** Fresh temp dir seeded with the given relative-path → content files (nested paths welcome). */
 function fixture(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "rinnegan-lib-"));
-  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), content);
+  }
   fixtureDirs.push(dir);
   return dir;
 }
@@ -154,5 +157,17 @@ describe("Rinnegan library", () => {
 
     expect(byPath.get("unused.ts")?.inboundEdges).toBe(0);
     expect(byPath.get("unused.ts")?.orphaned).toBe(true);
+  });
+
+  it("staleDocs finds inline-code doc mentions with no matching symbol", async () => {
+    const root2 = fixture({
+      "src/api.ts": "export function realFn() { return 1; }",
+      "docs/x.md": "Use `realFn` and `goneFn` for tasks.",
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const stale = vx2.staleDocs();
+    vx2.close();
+    expect(stale).toEqual([{ docPath: "docs/x.md", line: 1, name: "goneFn" }]);
   });
 });

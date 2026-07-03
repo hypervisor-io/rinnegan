@@ -46,6 +46,12 @@ export function renderVerify(report: VerifyReport): string {
   return lines.join("\n");
 }
 
+export interface StaleDoc {
+  docPath: string;
+  line: number;
+  name: string;
+}
+
 export interface InventoryRow {
   path: string;
   role: string;
@@ -257,6 +263,29 @@ export class Rinnegan {
         orphaned: inb === 0 && role !== "entrypoint",
       };
     });
+  }
+
+  /**
+   * Doc mentions (see `docs.ts`'s `docs-inline` edges) that don't resolve to any
+   * real symbol — likely stale references to renamed/deleted code. Sorted by
+   * (docPath, line, name).
+   */
+  staleDocs(): StaleDoc[] {
+    const real = this.store.allNodes().filter((n) => n.kind !== "file" && n.kind !== "import" && n.kind !== "unresolved");
+    const isReal = (name: string) => real.some((n) => n.qualifiedName === name || n.qualifiedName.endsWith(`.${name}`));
+    const out: StaleDoc[] = [];
+    for (const e of this.store.allEdges()) {
+      if (e.resolver !== "docs-inline") continue;
+      const target = this.store.getNode(e.target);
+      const doc = this.store.getNode(e.source);
+      if (!target || !doc) continue;
+      const name = target.qualifiedName.replace(/^<docref>\./, "");
+      if (isReal(name)) continue;
+      out.push({ docPath: doc.filePath, line: e.line, name });
+    }
+    return out.sort((a, b) =>
+      a.docPath !== b.docPath ? (a.docPath < b.docPath ? -1 : 1) : a.line !== b.line ? a.line - b.line : a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    );
   }
 
   /**
