@@ -8,6 +8,8 @@ import { understand, type UnderstandOpts, type UnderstandResult } from "./signal
 import { languageOf } from "./ingest/scanner.js";
 import { parseUnifiedDiff, applyDiff } from "./verify/diff.js";
 import { verifyChanges, sortFindings, type VerifyReport, type VerifyInput, type Finding } from "./verify/verify.js";
+import { computeDomains } from "./domains/domains.js";
+import type { MapResult } from "./domains/render.js";
 import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
 export { VERSION } from "./version.js";
@@ -16,6 +18,8 @@ export type { IndexStats } from "./index/indexer.js";
 export { type SyncStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
 export type { VerifyReport, VerifyInput, Finding, FindingRule } from "./verify/verify.js";
+export type { Domain, DomainEdge } from "./domains/domains.js";
+export type { MapResult } from "./domains/render.js";
 
 export interface RinneganOpts {
   dbPath?: string;
@@ -235,6 +239,31 @@ export class Rinnegan {
         orphaned: inb === 0 && role !== "entrypoint",
       };
     });
+  }
+
+  /**
+   * Architecture map: domains + inter-domain edges from `computeDomains`, each
+   * domain enriched with its top 5 non-file nodes by incoming-`calls` count
+   * (ties broken by lowest node id, for determinism).
+   */
+  map(): MapResult {
+    const { domains, edges } = computeDomains(this.store);
+    const nodesByFile = new Map<string, GraphNode[]>();
+    for (const n of this.store.allNodes()) {
+      if (n.kind === "file") continue;
+      const arr = nodesByFile.get(n.filePath);
+      if (arr) arr.push(n);
+      else nodesByFile.set(n.filePath, [n]);
+    }
+    const withTopSymbols = domains.map((d) => {
+      const ranked = d.files
+        .flatMap((f) => nodesByFile.get(f) ?? [])
+        .map((n) => ({ n, calls: this.store.incoming(n.id, ["calls"]).length }))
+        .sort((a, b) => (b.calls !== a.calls ? b.calls - a.calls : a.n.id < b.n.id ? -1 : 1));
+      const topSymbols = ranked.slice(0, 5).map(({ n }) => ({ name: n.qualifiedName, file: n.filePath, line: n.startLine }));
+      return { ...d, topSymbols };
+    });
+    return { domains: withTopSymbols, edges };
   }
 
   /** `.rinnegan-allow` entries merged with the caller-supplied allowlist (shared by `verify` and `verifyInputs`). */

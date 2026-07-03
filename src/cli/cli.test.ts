@@ -1,16 +1,19 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { runCli } from "./main.js";
 
 const fixtureDirs: string[] = [];
 
-/** Fresh temp dir seeded with the given relative-path → content files. */
+/** Fresh temp dir seeded with the given relative-path → content files (nested paths welcome). */
 function fixture(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "rinnegan-cli-"));
-  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), content);
+  }
   fixtureDirs.push(dir);
   return dir;
 }
@@ -149,6 +152,48 @@ describe("CLI", () => {
   it("verify --staged outside a git repo errors and names --diff", async () => {
     const dir = fixture({ "solo.ts": "export function orbit(x){ return x }\n" });
     await expect(runCli(["verify", "--staged"], () => {}, dir)).rejects.toThrow(/--diff/);
+  });
+
+  it("map prints domain markdown with entrypoints, top symbols, and dependency edges", async () => {
+    // ponytail: identifiers kept subtoken-disjoint (bootMain/login/mintTok/chargeCard) per the FTS quirk noted above.
+    const dir = fixture({
+      "package.json": JSON.stringify({ main: "./main.ts" }),
+      "main.ts": [
+        `import { login } from "./src/auth/login";`,
+        `import { chargeCard, refundCard } from "./src/billing/charge";`,
+        `export function bootMain() { login(); chargeCard(); refundCard(); }`,
+      ].join("\n"),
+      "src/auth/token.ts": `export function mintTok() { return "t"; }`,
+      "src/auth/login.ts": [`import { mintTok } from "./token";`, `export function login() { return mintTok(); }`].join("\n"),
+      "src/billing/charge.ts": [
+        `import { mintTok } from "../auth/token";`,
+        `export function chargeCard() { return mintTok(); }`,
+        `export function refundCard() { return 0; }`,
+      ].join("\n"),
+    });
+    await runCli(["index"], () => {}, dir);
+
+    const mdLines: string[] = [];
+    await runCli(["map"], (s) => mdLines.push(s), dir);
+    const text = mdLines.join("\n");
+    expect(text).toMatch(/^## /m);
+    expect(text).toContain("entrypoints: main.ts");
+    expect(text).toMatch(/- \S+ — \S+:\d+/);
+    expect(text).toContain("## dependencies");
+    expect(text).toMatch(/\S+ → \S+ \(\d+\)/);
+
+    const mermaidLines: string[] = [];
+    await runCli(["map", "--mermaid"], (s) => mermaidLines.push(s), dir);
+    const mermaid = mermaidLines.join("\n");
+    expect(mermaid.split("\n")[0]).toBe("flowchart LR");
+    expect(mermaid).toMatch(/-->\|\d+\|/);
+
+    const jsonLines: string[] = [];
+    await runCli(["map", "--json"], (s) => jsonLines.push(s), dir);
+    const m = JSON.parse(jsonLines.join(""));
+    expect(Array.isArray(m.domains)).toBe(true);
+    expect(Array.isArray(m.edges)).toBe(true);
+    expect(m.domains.every((d: { topSymbols: unknown[] }) => Array.isArray(d.topSymbols))).toBe(true);
   });
 
   it("verify --staged reads the git index directly (edited + deleted files)", async () => {

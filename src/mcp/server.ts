@@ -2,6 +2,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Rinnegan, freshnessStamp, renderLookup, renderVerify } from "../index.js";
+import { renderMapMarkdown } from "../domains/render.js";
 import { VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 
@@ -89,9 +90,18 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
     handler: async (a) => renderVerify(await vx.verify(str(a.diff))),
   };
 
-  const all = [understand, search, deps, refs, callers, impact, lookup, verify];
+  const map: ToolDef = {
+    name: "map",
+    description:
+      "Architecture map: domains, entrypoints, top symbols, inter-domain dependencies. " +
+      "Call before understand --scope on large repos.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => renderMapMarkdown(vx.map()),
+  };
+
+  const all = [understand, search, deps, refs, callers, impact, lookup, verify, map];
   const exposeAll = process.env.RINNEGAN_MCP_TOOLS === "all";
-  return { listed: exposeAll ? all : [understand, lookup, verify], all };
+  return { listed: exposeAll ? all : [understand, lookup, verify, map], all };
 }
 
 /** Create the MCP server (low-level Server → spec-correct stdio framing via the SDK). */

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Command } from "commander";
 import { Rinnegan, freshnessStamp, renderLookup, renderVerify, type SyncStats, type VerifyInput } from "../index.js";
+import { renderMapMarkdown, renderMapMermaid } from "../domains/render.js";
 import { parseUnifiedDiff } from "../verify/diff.js";
 import { VERSION } from "../version.js";
 
@@ -195,6 +196,18 @@ export function buildProgram(out: Out, cwd: string): Command {
       await ensureIndexed(vx);
       const i = vx.impact(symbol);
       out(json() ? JSON.stringify(i) : i.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)");
+      vx.close();
+    });
+
+  program
+    .command("map")
+    .description("Architecture map: domains, entrypoints, top symbols, inter-domain dependencies")
+    .option("--mermaid", "render as a mermaid flowchart instead of markdown")
+    .action(async (opts: { mermaid?: boolean }) => {
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      const m = vx.map();
+      out(json() ? JSON.stringify(m) : opts.mermaid ? renderMapMermaid(m) : renderMapMarkdown(m));
       vx.close();
     });
 

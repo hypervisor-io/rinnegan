@@ -54,9 +54,17 @@ describe("MCP tools", () => {
     for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("exposes exactly [understand, lookup, verify] by default (anti tool-overload)", () => {
+  it("exposes exactly [understand, lookup, verify, map] by default (anti tool-overload)", () => {
     const { listed } = buildTools(vx);
-    expect(listed.map((t) => t.name)).toEqual(["understand", "lookup", "verify"]);
+    expect(listed.map((t) => t.name)).toEqual(["understand", "lookup", "verify", "map"]);
+  });
+
+  it("map tool returns markdown with a domain header and a dependencies section", () => {
+    const { all } = buildTools(vx);
+    const map = all.find((t) => t.name === "map")!;
+    const text = map.handler({}, "") as string;
+    expect(text).toMatch(/^## /m);
+    expect(text).toContain("## dependencies");
   });
 
   it("understand tool returns a slice with the anchor symbol", () => {
