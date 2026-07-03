@@ -25,7 +25,8 @@ change — while marking exactly which facts are ground truth.
   at the context edges) so a fraction of a 1M window is more than enough.
 
 Surfaces: **library** (`Rinnegan`), **CLI** (`rinnegan understand <task>`), **MCP server**
-(single `understand` tool).
+(default tools: `understand`, `lookup`, `verify`, `map`; `RINNEGAN_MCP_TOOLS=all` adds
+`search`, `deps`, `refs`, `callers`, `impact`).
 
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the build plan.
 
@@ -36,11 +37,52 @@ npm install        # better-sqlite3 ships a prebuilt binary (Node 20+)
 npm run build
 node bin/rinnegan.js index            # build the SQLite knowledge graph
 node bin/rinnegan.js understand "how does X work"   # minimal provenance-tagged slice
-node bin/rinnegan.js mcp              # MCP server (single 'understand' tool)
+node bin/rinnegan.js mcp              # MCP server (understand, lookup, verify, map)
 ```
 
-Other commands: `search`, `deps <file>`, `refs <symbol> [--write|--read]`,
-`callers <symbol>`, `impact <symbol>`, `status`. Add `--json` for machine output.
+Other commands: `inventory`, `verify [--staged|--diff <file|->] [--allow <names...>]`,
+`search`, `deps <file>`, `refs <symbol> [--write|--read]`, `callers <symbol>`,
+`tests <symbol>`, `lookup <name>`, `impact <symbol>`, `docs --stale`, `map [--mermaid]`,
+`status`, `watch`. `understand` also takes `-s, --scope <domain>` to restrict the slice
+to one architectural domain (see `rinnegan map`). Add `--json` to any command for
+machine output.
+
+**Agent loop.** `understand` the task → `lookup` anything about to be called → write
+the patch → `verify` it → apply.
+
+## Sharing the index (CI cache)
+
+The index is one file: `.rinnegan/graph.db`. Cache it in CI so warm runs update instead
+of reindexing cold.
+
+```yaml
+- uses: actions/cache@v4
+  with:
+    path: .rinnegan
+    key: rinnegan-${{ runner.os }}-${{ github.sha }}
+    restore-keys: rinnegan-${{ runner.os }}-
+- run: node bin/rinnegan.js index
+```
+
+`index`'s two-gate change detection (mtime, then hash) means a restored cache only
+reparses what changed since it was written — not the whole repo. Confirm two machines
+(or a cache restore vs. the working tree) hold the same corpus:
+
+```bash
+node bin/rinnegan.js status --json | jq .fingerprint
+```
+
+No S3 or git-backed store for the index — it's a single SQLite file, so `actions/cache`
+(or a plain `cp`) is the whole sharing story.
+
+## Pre-commit gate
+
+```bash
+echo 'rinnegan verify --staged || exit 1' >> .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+Only unknown-symbol errors block the commit; signature echoes and blast-radius warnings
+inform but never fail it.
 
 ## Purpose
 
