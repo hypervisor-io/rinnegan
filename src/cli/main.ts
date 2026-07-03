@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Command } from "commander";
-import { Rinnegan, freshnessStamp, type SyncStats, type VerifyInput, type VerifyReport } from "../index.js";
+import { Rinnegan, freshnessStamp, renderLookup, type SyncStats, type VerifyInput, type VerifyReport } from "../index.js";
 import { parseUnifiedDiff } from "../verify/diff.js";
 import { VERSION } from "../version.js";
 
@@ -181,6 +181,17 @@ export function buildProgram(out: Out, cwd: string): Command {
       await ensureIndexed(vx);
       const c = vx.callers(symbol);
       out(json() ? JSON.stringify(c) : c.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)");
+      vx.close();
+    });
+
+  program
+    .command("lookup <name>")
+    .description("Exact symbol fact, or an explicit NOT FOUND")
+    .action(async (name: string) => {
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      const r = vx.lookup(name);
+      out(json() ? JSON.stringify(r) : renderLookup(r));
       vx.close();
     });
 

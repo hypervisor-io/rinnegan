@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Rinnegan, freshnessStamp } from "./index.js";
+import { Rinnegan, freshnessStamp, renderLookup } from "./index.js";
 
 const fixtureDirs: string[] = [];
 
@@ -83,6 +83,50 @@ describe("Rinnegan library", () => {
   it("freshnessStamp wording", () => {
     expect(freshnessStamp({ reindexed: 0, removed: 0 })).toBe("# index: fresh");
     expect(freshnessStamp({ reindexed: 2, removed: 1 })).toBe("# index: 2 file(s) reindexed, 1 removed just now");
+  });
+
+  it("lookup finds validate with signature, location, and caller count", () => {
+    const r = vx.lookup("validate");
+    expect(r.found).toBe(true);
+    if (!r.found) throw new Error("expected found");
+    expect(r.node.qualifiedName).toBe("validate");
+    expect(r.node.kind).toBe("function");
+    expect(r.node.filePath).toBe("auth.ts");
+    expect(r.node.startLine).toBe(6);
+    expect(r.callers).toBe(1);
+    expect(renderLookup(r)).toBe(
+      `validate  [function]\n${r.node.signature}\nauth.ts:6\ncallers: 1`,
+    );
+  });
+
+  it("lookup on a missing symbol returns the exact NOT FOUND sentence and at most 3 suggestions", () => {
+    const r = vx.lookup("zzzNoSuchSymbolAnywhere");
+    expect(r.found).toBe(false);
+    if (r.found) throw new Error("expected not found");
+    expect(r.message).toBe(
+      "NOT FOUND — no symbol named 'zzzNoSuchSymbolAnywhere' exists in this codebase. Do not invent it.",
+    );
+    expect(r.suggestions.length).toBeLessThanOrEqual(3);
+    expect(renderLookup(r)).toContain(r.message);
+  });
+
+  it("lookup prefers an exact qualifiedName match over a dotted-suffix match", () => {
+    const root2 = fixture({
+      "outer.ts": [
+        "export class Widget {",
+        "  target() { return 1; }",
+        "}",
+        "export function target() { return 2; }",
+      ].join("\n"),
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    return vx2.indexAll().then(() => {
+      const r = vx2.lookup("target");
+      vx2.close();
+      expect(r.found).toBe(true);
+      if (!r.found) throw new Error("expected found");
+      expect(r.node.qualifiedName).toBe("target"); // exact match, not "Widget.target"
+    });
   });
 
   it("inventory: entrypoint with zero inbound is not orphaned, unused file is orphaned, used file has inbound edges", async () => {

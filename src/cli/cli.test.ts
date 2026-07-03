@@ -45,6 +45,24 @@ describe("CLI", () => {
     expect(lines.join("\n")).toContain("login");
   });
 
+  it("lookup command prints renderLookup output for a found symbol", async () => {
+    const lines: string[] = [];
+    await runCli(["lookup", "validate"], (s) => lines.push(s), root);
+    const text = lines.join("\n");
+    expect(text).toContain("validate  [function]");
+    expect(text).toContain("callers: 1");
+  });
+
+  it("lookup --json prints the LookupResult for a missing symbol", async () => {
+    const lines: string[] = [];
+    await runCli(["--json", "lookup", "zzzNoSuchSymbolAnywhere"], (s) => lines.push(s), root);
+    const r = JSON.parse(lines.join(""));
+    expect(r.found).toBe(false);
+    expect(r.message).toBe(
+      "NOT FOUND — no symbol named 'zzzNoSuchSymbolAnywhere' exists in this codebase. Do not invent it.",
+    );
+  });
+
   it("--json produces parseable output", async () => {
     const lines: string[] = [];
     await runCli(["--json", "status"], (s) => lines.push(s), root);

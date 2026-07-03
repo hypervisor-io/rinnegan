@@ -21,6 +21,19 @@ export interface RinneganOpts {
   dbPath?: string;
 }
 
+export type LookupResult =
+  | { found: true; node: GraphNode; callers: number }
+  | { found: false; message: string; suggestions: { name: string; file: string; line: number }[] };
+
+/** `lookup`'s rendering, shared by the CLI and MCP surfaces. */
+export function renderLookup(r: LookupResult): string {
+  if (r.found) {
+    return `${r.node.qualifiedName}  [${r.node.kind}]\n${r.node.signature ?? "(no signature)"}\n${r.node.filePath}:${r.node.startLine}\ncallers: ${r.callers}`;
+  }
+  if (r.suggestions.length === 0) return r.message;
+  return [r.message, "did you mean:", ...r.suggestions.map((s) => `${s.file}:${s.line}  ${s.name}`)].join("\n");
+}
+
 export interface InventoryRow {
   path: string;
   role: string;
@@ -105,6 +118,27 @@ export class Rinnegan {
       all.find((n) => n.qualifiedName.endsWith(`.${name}`)) ??
       this.store.searchFts(name, 1)[0]
     );
+  }
+
+  /**
+   * Exact symbol fact or an explicit NOT FOUND — no FTS fallback, so this
+   * never quietly guesses (contrast with `resolveSymbol`, which does).
+   */
+  lookup(name: string): LookupResult {
+    const candidates = this.store
+      .allNodes()
+      .filter((n) => n.kind !== "file" && n.kind !== "import" && n.kind !== "unresolved")
+      .filter((n) => n.qualifiedName === name || n.qualifiedName.endsWith(`.${name}`));
+    // allNodes() is ORDER BY id, so the first exact match (else first suffix match) is deterministic.
+    const node = candidates.find((n) => n.qualifiedName === name) ?? candidates[0];
+    if (!node) {
+      return {
+        found: false,
+        message: `NOT FOUND — no symbol named '${name}' exists in this codebase. Do not invent it.`,
+        suggestions: this.store.searchFts(name, 3).map((n) => ({ name: n.qualifiedName, file: n.filePath, line: n.startLine })),
+      };
+    }
+    return { found: true, node, callers: this.store.incoming(node.id, ["calls"]).length };
   }
 
   /** File-scoped dependency query (codegraph #500): what this file's symbols call/reference out. */
