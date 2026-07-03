@@ -1,3 +1,4 @@
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "./graph/store.js";
 import { Indexer, type IndexStats, type SyncStats } from "./index/indexer.js";
@@ -5,6 +6,8 @@ import { SemanticEngine } from "./semantic/engine.js";
 import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
 import { languageOf } from "./ingest/scanner.js";
+import { parseUnifiedDiff, applyDiff } from "./verify/diff.js";
+import { verifyChanges, sortFindings, type VerifyReport, type VerifyInput, type Finding } from "./verify/verify.js";
 import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
 export { VERSION } from "./version.js";
@@ -12,6 +15,7 @@ export type { GraphNode, GraphEdge, Provenance, ReadWrite, NodeKind, EdgeKind } 
 export type { IndexStats } from "./index/indexer.js";
 export { type SyncStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
+export type { VerifyReport, VerifyInput, Finding, FindingRule } from "./verify/verify.js";
 
 export interface RinneganOpts {
   dbPath?: string;
@@ -189,6 +193,52 @@ export class Rinnegan {
         orphaned: inb === 0 && role !== "entrypoint",
       };
     });
+  }
+
+  /**
+   * Graph-native fact-check of a diff: unknown symbols, ground-truth signature
+   * echoes, and blast radius of edited definitions. Never mutates the on-disk
+   * index — the overlay it builds lives inside a transaction that always
+   * rolls back (see verify.ts).
+   */
+  async verify(diffText: string, opts: { allow?: string[] } = {}): Promise<VerifyReport> {
+    const files = parseUnifiedDiff(diffText);
+    const inputs: VerifyInput[] = [];
+    const parseFailures: Finding[] = [];
+    for (const f of files) {
+      if (f.deleted) {
+        inputs.push({ path: f.path, postImage: null, addedRanges: f.addedRanges });
+        continue;
+      }
+      try {
+        const original = f.created ? "" : readFileSync(join(this.root, f.path), "utf8");
+        inputs.push({ path: f.path, postImage: applyDiff(original, f.hunks), addedRanges: f.addedRanges });
+      } catch (err) {
+        parseFailures.push({
+          severity: "error",
+          rule: "parse-failure",
+          file: f.path,
+          line: 1,
+          message: `failed to read/apply diff for ${f.path}: ${(err as Error).message}`,
+        });
+      }
+    }
+
+    const allow = new Set(opts.allow ?? []);
+    const allowFile = join(this.root, ".rinnegan-allow");
+    if (existsSync(allowFile)) {
+      for (const line of readFileSync(allowFile, "utf8").split("\n")) {
+        const t = line.trim();
+        if (t && !t.startsWith("#")) allow.add(t);
+      }
+    }
+
+    const report = await verifyChanges(this.store, this.root, inputs, { allow });
+    if (parseFailures.length) {
+      report.findings.push(...parseFailures);
+      report.findings = sortFindings(report.findings);
+    }
+    return report;
   }
 
   close(): void {
