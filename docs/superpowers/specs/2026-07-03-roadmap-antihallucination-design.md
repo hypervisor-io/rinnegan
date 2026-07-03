@@ -27,6 +27,28 @@ the goal and rejects what breaks the product's differentiator:
   rebuilt deterministically. CI caching + file copy solves sharing without an
   abstraction layer.
 
+## Phase 0 — Freshness guard
+
+**Problem:** the MCP server indexes once at startup (`runMcp`) and never again.
+A long-lived session serves stale line numbers and signatures labeled
+`ast_exact` — stale ground truth is the worst hallucination amplifier the
+product can produce.
+
+**Fix:**
+- Before each MCP tool call, run a mtime sweep over known files (gate 1 of the
+  indexer's two-gate change detection — milliseconds) and `reindexPath` any
+  changed/removed files. New files are picked up by a periodic full scan or on
+  sweep miss; correctness bar: no tool answer may cite a file the sweep saw change
+  without reparsing it first.
+- CLI commands already re-open per invocation but only auto-index when the DB is
+  empty (`ensureIndexed`); they get the same sweep so answers are never stale.
+- `understand` output header gains a freshness stamp: `# index: fresh` or
+  `# index: N file(s) reindexed just now` — the reader knows facts reflect the
+  working tree at answer time.
+
+**Testing:** modify a fixture file after indexing, call `understand`/a tool,
+assert the answer reflects the new content and the stamp reports the reindex.
+
 ## Phase 1 — Role classification + inventory
 
 **What:** Every indexed file gets a `role`, computed deterministically at index
@@ -111,11 +133,26 @@ signatures are, and what breaks if edited definitions change.
 **Surfaces:**
 - CLI: `rinnegan verify [--staged | --diff <patch>] [--json]`. Exit code 1 iff
   any error-severity finding. JSON mode emits the findings array for agents.
-- MCP: second tool `verify` (input: unified diff text) alongside `understand` —
-  the agent loop becomes: `understand` → write patch → `verify` → fix → apply.
+- MCP: new tools `verify` (input: unified diff text) and `lookup` (below) join
+  `understand` in the default-listed set.
 - Pre-commit: documented one-line hook (`rinnegan verify --staged`) in README;
   no husky dependency, users add it to `.git/hooks/pre-commit` or their existing
   hook manager.
+
+**`lookup` — the pre-write companion to verify:**
+`verify` catches hallucinations after code is written; `lookup` prevents them
+before. New MCP tool + CLI command:
+
+- Input: exact symbol name (optionally qualified).
+- Output when found: ground-truth signature, `file:line`, kind, caller count,
+  provenance — the facts needed to call it correctly.
+- Output when absent: explicit `NOT FOUND — no symbol named 'X' exists in this
+  codebase. Do not invent it.` Plus up to 3 nearest FTS matches as "did you mean".
+  The explicit negative is the point: agents treat silence as license to invent;
+  a stated negative is evidence.
+
+The agent loop becomes: `understand` → `lookup` anything you are about to call →
+write patch → `verify` → apply.
 
 **Honesty constraints (same provenance discipline as the rest of the product):**
 - Only `ast_exact` facts produce error-severity findings. Heuristic resolutions
@@ -152,6 +189,19 @@ architecture overview for humans.
 spine expansion to files in that domain. Helps large repos: the agent first calls
 `map`, then `understand --scope`.
 
+**Stale-doc detection:** the docs parser currently extracts links/wikilinks but
+ignores inline code. Extend it to resolve `` `identifier` `` mentions against the
+graph, producing `references` edges with `heuristic` provenance (name match only).
+New command: `rinnegan docs --stale` — lists doc locations whose referenced
+symbol no longer exists (`doc.md:12 mentions 'oldFunc' — no such symbol`).
+Humans stop learning from rotten docs; agents stop citing them.
+
+**Test linkage:** test-file call edges are already in the graph, and Phase 1
+marks test files. New command: `rinnegan tests <symbol>` — tests that (transitively,
+depth 2) call the symbol. `understand` DETAIL tier gains a one-line
+`covered-by: test/a.test.ts, …` annotation per symbol (empty = visible coverage
+gap, no instrumentation needed). Agents learn which tests to run after an edit.
+
 ## Phase 4 — Index sharing (deliberately minimal)
 
 **What:** Make the already-deterministic index easy to share; build no storage
@@ -167,13 +217,18 @@ abstraction.
 ## Build order & dependencies
 
 ```
-Phase 1 (roles) ──feeds──▶ Phase 2 (verify skips vendored/generated)
-        └────────feeds──▶ Phase 3 (entrypoints anchor domains)
+Phase 0 (freshness) independent — ship first, everything downstream depends on
+                    answers being current.
+Phase 1 (roles) ──feeds──▶ Phase 2 (verify skips vendored/generated; test roles
+        │                  gate nothing but inform reporting)
+        └────────feeds──▶ Phase 3 (entrypoints anchor domains; test roles feed
+                           test linkage)
 Phase 4 independent, mostly documentation.
 ```
 
-Each phase ships independently: schema change + inventory (1), verify (2),
-map (3), fingerprint + docs (4). Phases 2 and 3 can build in parallel after 1.
+Each phase ships independently: freshness (0), schema change + inventory (1),
+verify + lookup (2), map + stale-docs + test linkage (3), fingerprint + docs (4).
+Phases 2 and 3 can build in parallel after 1.
 
 ## Testing
 
@@ -183,9 +238,12 @@ Same style as the existing suite (vitest, real fixtures, no mocks of the graph):
 - Phase 2: fixture diff introducing (a) a call to a nonexistent symbol,
   (b) a call to a real symbol, (c) an edit to a called definition; assert
   error/info/warn findings respectively; assert exit codes; assert vendored file
-  changes are skipped.
+  changes are skipped. `lookup`: found symbol returns signature + location;
+  absent symbol returns the explicit NOT FOUND text + nearest matches.
 - Phase 3: fixture with two directories importing across a shared module; assert
-  stable domain assignment across two runs (byte-identical output).
+  stable domain assignment across two runs (byte-identical output). Stale-docs:
+  doc mentioning a real and a dead symbol → exactly the dead one reported.
+  Test linkage: symbol called by a test file → listed by `rinnegan tests`.
 - Phase 4: fingerprint stable across re-index of unchanged corpus; changes when
   any file changes.
 
@@ -205,3 +263,6 @@ Neural embeddings, LLM-based evaluation of any kind, secrets/lint/test runners,
 LSP integration, xattr metadata, S3/git storage backends, multi-repo federation
 (hierarchical keys/namespaces across repos). Each either breaks determinism,
 duplicates an existing tool, or solves a problem no user has hit yet.
+
+**Deferred (cheap, revisit on demand):** `understand --changed` — seed the slice
+from the working-tree diff instead of task text alone.
