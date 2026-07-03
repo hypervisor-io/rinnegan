@@ -88,8 +88,26 @@ export class Rinnegan {
     return this.semantic;
   }
 
-  understand(task: string, opts: Partial<UnderstandOpts> = {}): UnderstandResult {
-    return understand(this.store, this.sem(), task, { root: this.root, ...opts });
+  /**
+   * `opts.scope` names a domain from `computeDomains` (e.g. "auth") and is resolved
+   * to that domain's file set before delegating to the signal-level `understand`.
+   * Two distinct domains can share a display name (a directory-prefix collision
+   * after label propagation) — when `scope` matches more than one, their file
+   * sets are unioned rather than picking one arbitrarily.
+   */
+  understand(task: string, opts: Partial<UnderstandOpts> & { scope?: string } = {}): UnderstandResult {
+    const { scope, ...rest } = opts;
+    let scopeFiles = rest.scopeFiles;
+    if (typeof scope === "string") {
+      const { domains } = computeDomains(this.store);
+      const matches = domains.filter((d) => d.name === scope);
+      if (matches.length === 0) {
+        const available = [...new Set(domains.map((d) => d.name))].join(", ");
+        throw new Error(`unknown domain '${scope}' — available: ${available}`);
+      }
+      scopeFiles = new Set(matches.flatMap((d) => d.files));
+    }
+    return understand(this.store, this.sem(), task, { root: this.root, ...rest, scopeFiles });
   }
 
   /** Reconcile index with the working tree. Answers must never be stale. */

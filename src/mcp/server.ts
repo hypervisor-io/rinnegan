@@ -27,11 +27,18 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
       properties: {
         task: { type: "string", description: "What you are about to do, in a sentence." },
         budget: { type: "number", description: "Token budget for the slice (default 6000)." },
+        scope: { type: "string", description: "Restrict the slice to one domain name from the `map` tool." },
       },
       required: ["task"],
     },
     handler: (a, stamp) =>
-      [stamp, vx.understand(str(a.task), { tokenBudget: typeof a.budget === "number" ? a.budget : undefined }).text].join("\n"),
+      [
+        stamp,
+        vx.understand(str(a.task), {
+          tokenBudget: typeof a.budget === "number" ? a.budget : undefined,
+          scope: str(a.scope) || undefined,
+        }).text,
+      ].join("\n"),
   };
 
   const search: ToolDef = {

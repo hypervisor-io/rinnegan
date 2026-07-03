@@ -98,10 +98,11 @@ export function buildProgram(out: Out, cwd: string): Command {
     .command("understand <task...>")
     .description("Return the minimal, provenance-tagged signal slice for a task")
     .option("-b, --budget <n>", "token budget", "6000")
-    .action(async (task: string[], opts: { budget: string }) => {
+    .option("-s, --scope <domain>", "restrict the slice to one domain (see `rinnegan map`)")
+    .action(async (task: string[], opts: { budget: string; scope?: string }) => {
       const vx = openIndexed(dir());
       const fresh = await ensureIndexed(vx);
-      const res = vx.understand(task.join(" "), { tokenBudget: Number(opts.budget) });
+      const res = vx.understand(task.join(" "), { tokenBudget: Number(opts.budget), scope: opts.scope });
       out(
         json()
           ? JSON.stringify({ tokensEstimate: res.tokensEstimate, anchors: res.anchors, text: res.text, fresh })

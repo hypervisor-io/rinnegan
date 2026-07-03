@@ -1,4 +1,5 @@
 import { GraphStore } from "../graph/store.js";
+import type { GraphNode } from "../core/types.js";
 
 /**
  * Expand from anchor symbols to the minimal connected subgraph that links them —
@@ -8,8 +9,9 @@ import { GraphStore } from "../graph/store.js";
 export function extractSpine(
   store: GraphStore,
   anchors: string[],
-  opts: { depth: number; maxNodes: number },
+  opts: { depth: number; maxNodes: number; include?: (n: GraphNode) => boolean },
 ): Set<string> {
+  const include = opts.include ?? (() => true);
   const included = new Set<string>(anchors);
   let frontier = [...anchors];
 
@@ -19,6 +21,8 @@ export function extractSpine(
       // forward: what this symbol calls / references / contains
       for (const e of store.outgoing(id, ["calls", "references", "contains"])) {
         if (!included.has(e.target)) {
+          const n = store.getNode(e.target);
+          if (!n || !include(n)) continue;
           included.add(e.target);
           next.push(e.target);
         }
@@ -26,6 +30,8 @@ export function extractSpine(
       // backward: callers and the enclosing container (context)
       for (const e of store.incoming(id, ["calls", "contains"])) {
         if (!included.has(e.source)) {
+          const n = store.getNode(e.source);
+          if (!n || !include(n)) continue;
           included.add(e.source);
           next.push(e.source);
         }

@@ -172,3 +172,53 @@ describe("role-aware ranking", () => {
     store.close();
   });
 });
+
+describe("understand --scope", () => {
+  afterAll(() => {
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  // Two domains (auth/, billing/) with no cross-file edges, so computeDomains
+  // keeps them separate. Both define a "gizmo*" symbol — the shared term that
+  // the FTS fallback matches in *both* domains when unscoped — but every other
+  // identifier (loginFlow/chargeFlow, param names u/c) is a distinct word, so
+  // no incidental camelCase subtoken links the two domains together.
+  const SCOPE_FILES = {
+    "auth/login.ts": [
+      "export function loginFlow(u: string) {",
+      "  return gizmoCheck(u);",
+      "}",
+      "function gizmoCheck(u: string) {",
+      "  return u.length > 0;",
+      "}",
+    ].join("\n"),
+    "billing/charge.ts": [
+      "export function chargeFlow(c: string) {",
+      "  return gizmoVerify(c);",
+      "}",
+      "function gizmoVerify(c: string) {",
+      "  return c.length > 0;",
+      "}",
+    ].join("\n"),
+  };
+
+  it("restricts the slice to the scoped domain's files", async () => {
+    const root = fixture(SCOPE_FILES);
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+    const res = vx.understand("gizmo", { scope: "auth" });
+    expect(res.text).toContain("auth/login.ts");
+    expect(res.text).not.toContain("billing/charge.ts");
+    vx.close();
+  });
+
+  it("throws for an unknown scope, listing available domains", async () => {
+    const root = fixture(SCOPE_FILES);
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+    expect(() => vx.understand("gizmo", { scope: "nope" })).toThrow(
+      "unknown domain 'nope' — available: auth, billing",
+    );
+    vx.close();
+  });
+});
