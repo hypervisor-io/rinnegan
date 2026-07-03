@@ -206,10 +206,18 @@ export class Rinnegan {
   callers(symbol: string): GraphNode[] {
     const node = this.resolveSymbol(symbol);
     if (!node) return [];
-    return this.store
-      .incoming(node.id, ["calls"])
-      .map((e) => this.store.getNode(e.source))
-      .filter((n): n is GraphNode => !!n);
+    const seen = new Set<string>();
+    const out: GraphNode[] = [];
+    for (const e of this.store.incoming(node.id, ["calls"])) {
+      // one edge per call SITE now (F1) — the same caller can call the same
+      // target from multiple lines, so dedupe by node id, preserving order.
+      if (seen.has(e.source)) continue;
+      const n = this.store.getNode(e.source);
+      if (!n) continue;
+      seen.add(e.source);
+      out.push(n);
+    }
+    return out;
   }
 
   /** Blast radius: who is (transitively) affected by changing this symbol. */

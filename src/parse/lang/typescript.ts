@@ -204,7 +204,9 @@ export function extractTypeScript(path: string, source: string, language: string
 
   const emittedEdge = new Set<string>();
   function pushEdge(e: GraphEdge): void {
-    const key = `${e.source}|${e.target}|${e.kind}|${e.readWrite ?? ""}`;
+    // line in the key so each call SITE gets an edge — verify's added-range
+    // check needs per-site granularity, not just per-(source,target) (F1).
+    const key = `${e.source}|${e.target}|${e.kind}|${e.readWrite ?? ""}|${e.line}`;
     if (emittedEdge.has(key)) return;
     emittedEdge.add(key);
     edges.push(e);

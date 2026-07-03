@@ -75,6 +75,18 @@ describe("Rinnegan.verify", () => {
     expect(f!.message).toContain("src/api.ts:");
   });
 
+  it("flags a second call to an already-called target on its own added line (F1: per-call-site edges)", async () => {
+    // consumer.ts already calls realFn("y") once (line 2); this diff adds a
+    // second call to the SAME target from the SAME owner scope on line 3. Before
+    // the fix, the extractor's dedup key ignored line number, so the reparsed
+    // post-image collapsed both calls into one edge at line 2 — outside the
+    // added range — and the added call went unseen (false negative).
+    const rep = await vx.verify(diffAdding("src/consumer.ts", 'realFn("x");'));
+    const f = rep.findings.find((x) => x.rule === "signature-echo" && x.line === 3);
+    expect(f).toBeTruthy();
+    expect(f!.message).toContain("realFn(a: string)");
+  });
+
   it("warns blast radius when a called definition is edited", async () => {
     const diff = [
       "--- a/src/api.ts",
