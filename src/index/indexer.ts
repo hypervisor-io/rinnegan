@@ -46,7 +46,7 @@ export class Indexer {
     const content = readFileSync(abs, "utf8");
     const hash = contentHash(content);
     if (meta && meta.hash === hash) {
-      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds });
+      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds, role: meta?.role ?? "library" });
       return false; // gate 2
     }
 
@@ -57,7 +57,7 @@ export class Indexer {
       for (const e of res.edges) this.store.insertEdge(e);
       this.store.setImports(f.path, res.imports);
     });
-    this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id) });
+    this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id), role: meta?.role ?? "library" });
     return true;
   }
 

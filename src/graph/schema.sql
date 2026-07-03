@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS files (
   path     TEXT PRIMARY KEY,
   hash     TEXT NOT NULL,
   mtime_ms REAL NOT NULL,
-  node_ids TEXT NOT NULL
+  node_ids TEXT NOT NULL,
+  role     TEXT NOT NULL DEFAULT 'library'
 );
 
 CREATE TABLE IF NOT EXISTS imports (

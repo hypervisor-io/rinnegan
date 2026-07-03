@@ -11,6 +11,7 @@ export interface FileMeta {
   hash: string;
   mtimeMs: number;
   nodeIds: string[];
+  role: string;
 }
 
 /** Lowercase tokens from an identifier-ish string: camelCase + snake + dots split. */
@@ -49,6 +50,10 @@ export class GraphStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.exec(SCHEMA);
+
+    // Additive migration: old DBs predate the `role` column.
+    const cols = (this.db.pragma("table_info(files)") as { name: string }[]).map((c) => c.name);
+    if (!cols.includes("role")) this.db.exec(`ALTER TABLE files ADD COLUMN role TEXT NOT NULL DEFAULT 'library'`);
   }
 
   /** Memoized prepared statement — compile each SQL once, reuse for every call. */
@@ -193,14 +198,20 @@ export class GraphStore {
 
   getFileMeta(path: string): FileMeta | undefined {
     const r = this.stmt(`SELECT * FROM files WHERE path = ?`).get(path) as
-      | { path: string; hash: string; mtime_ms: number; node_ids: string } | undefined;
-    return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids) } : undefined;
+      | { path: string; hash: string; mtime_ms: number; node_ids: string; role: string | null } | undefined;
+    return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids), role: r.role ?? "library" } : undefined;
   }
 
   setFileMeta(path: string, meta: FileMeta): void {
     this.stmt(
-      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids) VALUES (?,?,?,?)`,
-    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds));
+      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids,role) VALUES (?,?,?,?,?)`,
+    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds), meta.role);
+  }
+
+  /** Role per indexed file path, sorted by path. */
+  roleByFile(): Map<string, string> {
+    const rows = this.stmt(`SELECT path, role FROM files ORDER BY path`).all() as { path: string; role: string }[];
+    return new Map(rows.map((r) => [r.path, r.role]));
   }
 
   /** Remove all nodes/edges that originated from a file (for re-index). */
