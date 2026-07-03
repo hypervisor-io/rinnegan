@@ -1,6 +1,6 @@
 node_modules/
 dist/
-.veridex/
+.rinnegan/
 *.log
 .DS_Store
 .superpowers/
