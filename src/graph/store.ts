@@ -232,6 +232,11 @@ export class GraphStore {
     this.db.close();
   }
 
+  /** All indexed file paths, sorted. */
+  allFilePaths(): string[] {
+    return (this.stmt(`SELECT path FROM files ORDER BY path`).all() as { path: string }[]).map((r) => r.path);
+  }
+
   stats(): { nodes: number; edges: number; files: number } {
     const n = (this.stmt(`SELECT count(*) c FROM nodes`).get() as { c: number }).c;
     const e = (this.stmt(`SELECT count(*) c FROM edges`).get() as { c: number }).c;

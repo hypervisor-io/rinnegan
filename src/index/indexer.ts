@@ -13,6 +13,8 @@ export interface IndexStats {
   edges: number;
 }
 
+export interface SyncStats { reindexed: number; removed: number }
+
 /**
  * Orchestrates scan → two-gate change detection → parse → atomic persist.
  * Deterministic: files processed in sorted order; inserts batched per file.
@@ -57,6 +59,24 @@ export class Indexer {
     });
     this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id) });
     return true;
+  }
+
+  /**
+   * Reconcile index with the working tree: reindex changed/new files, remove
+   * deleted ones, refresh cross-file edges only if anything moved. Cheap when
+   * nothing changed (scan + one stat per file — gate 1).
+   */
+  async sync(root: string): Promise<SyncStats> {
+    const scanned = scanFiles(root);
+    const onDisk = new Set(scanned.map((f) => f.path));
+    let removed = 0;
+    for (const path of this.store.allFilePaths()) {
+      if (!onDisk.has(path)) { this.store.removeFile(path); removed++; }
+    }
+    let reindexed = 0;
+    for (const f of scanned) if (await this.indexOne(root, f)) reindexed++;
+    if (reindexed + removed > 0) this.store.tx(() => resolveImports(this.store));
+    return { reindexed, removed };
   }
 
   /** Re-index a single file (or remove it if gone), then refresh cross-file edges. */
