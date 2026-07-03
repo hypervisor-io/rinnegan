@@ -48,6 +48,32 @@ describe("CLI", () => {
     expect(lines.join("\n")).toContain("login");
   });
 
+  it("tests command prints the covering test file's location; --json emits the node array", async () => {
+    const dir = fixture({
+      "src/pay.ts": "export function charge() { return 1; }",
+      "src/pay.test.ts": ["import { charge } from \"./pay\";", "charge();"].join("\n"),
+    });
+    await runCli(["index"], () => {}, dir);
+
+    const lines: string[] = [];
+    await runCli(["tests", "charge"], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toContain("src/pay.test.ts");
+
+    const jsonLines: string[] = [];
+    await runCli(["--json", "tests", "charge"], (s) => jsonLines.push(s), dir);
+    const arr = JSON.parse(jsonLines.join("")) as { filePath: string }[];
+    expect(arr.some((n) => n.filePath === "src/pay.test.ts")).toBe(true);
+  });
+
+  it("tests command prints (none) for a symbol with no covering test", async () => {
+    const dir = fixture({ "src/pay.ts": "export function charge() { return 1; }" });
+    await runCli(["index"], () => {}, dir);
+
+    const lines: string[] = [];
+    await runCli(["tests", "charge"], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toBe("(none)");
+  });
+
   it("lookup command prints renderLookup output for a found symbol", async () => {
     const lines: string[] = [];
     await runCli(["lookup", "validate"], (s) => lines.push(s), root);

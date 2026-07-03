@@ -65,6 +65,10 @@ describe("Rinnegan library", () => {
     expect(vx.impact("validate").map((n) => n.qualifiedName)).toContain("login");
   });
 
+  it("testsFor returns [] for a symbol with no callers at all", () => {
+    expect(vx.testsFor("validate")).toEqual([]);
+  });
+
   it("refresh picks up an edit so understand cites current facts", async () => {
     // ponytail: fixture names use "alpha"/"beta" (not the brief's literal oldName/newName) —
     // GraphStore.searchFts OR-matches sub-tokens, so "oldName" would false-positive-match a
@@ -169,5 +173,25 @@ describe("Rinnegan library", () => {
     const stale = vx2.staleDocs();
     vx2.close();
     expect(stale).toEqual([{ docPath: "docs/x.md", line: 1, name: "goneFn" }]);
+  });
+
+  it("testsFor finds the test file that calls a symbol", async () => {
+    const root2 = fixture({
+      "src/pay.ts": "export function charge() { return 1; }",
+      "src/pay.test.ts": ["import { charge } from \"./pay\";", "charge();"].join("\n"),
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const tests = vx2.testsFor("charge");
+    vx2.close();
+    expect(tests.map((n) => n.filePath)).toEqual(["src/pay.test.ts"]);
+  });
+
+  it("testsFor returns [] when the symbol doesn't resolve", async () => {
+    const root2 = fixture({ "src/pay.ts": "export function charge() { return 1; }" });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    expect(vx2.testsFor("zzzNoSuchSymbolAnywhere")).toEqual([]);
+    vx2.close();
   });
 });

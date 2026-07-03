@@ -234,6 +234,36 @@ export class Rinnegan {
     return [...seen].map((id) => this.store.getNode(id)).filter((n): n is GraphNode => !!n);
   }
 
+  /**
+   * Tests that (transitively) exercise a symbol: BFS up incoming `calls`
+   * edges to `depth`, keeping every visited node whose file's role is
+   * `test`. Sorted by (filePath, startLine).
+   */
+  testsFor(symbol: string, depth = 2): GraphNode[] {
+    const node = this.resolveSymbol(symbol);
+    if (!node) return [];
+    const roles = this.store.roleByFile();
+    const seen = new Set<string>([node.id]);
+    const found = new Map<string, GraphNode>();
+    let frontier = [node.id];
+    for (let d = 0; d < depth; d++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const e of this.store.incoming(id, ["calls"])) {
+          if (seen.has(e.source)) continue;
+          seen.add(e.source);
+          next.push(e.source);
+          const n = this.store.getNode(e.source);
+          if (n && roles.get(n.filePath) === "test") found.set(n.id, n);
+        }
+      }
+      frontier = next;
+    }
+    return [...found.values()].sort((a, b) =>
+      a.filePath !== b.filePath ? (a.filePath < b.filePath ? -1 : 1) : a.startLine - b.startLine,
+    );
+  }
+
   stats() {
     return this.store.stats();
   }

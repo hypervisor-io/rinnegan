@@ -173,6 +173,31 @@ describe("role-aware ranking", () => {
   });
 });
 
+describe("covered-by (test linkage in DETAIL)", () => {
+  afterAll(() => {
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("a def called from a test file gets a covered-by line naming it; an uncalled def gets (none)", async () => {
+    const root = fixture({
+      "src/pay.ts": [
+        "export function charge() { return 1; }",
+        "export function refund() { return 2; }",
+      ].join("\n"),
+      "src/pay.test.ts": ["import { charge } from \"./pay\";", "charge();"].join("\n"),
+    });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+
+    const chargeSlice = vx.understand("charge payment", { tokenBudget: 4000 });
+    expect(chargeSlice.text).toContain("covered-by: src/pay.test.ts");
+
+    const refundSlice = vx.understand("refund payment", { tokenBudget: 4000 });
+    expect(refundSlice.text).toContain("covered-by: (none)");
+    vx.close();
+  });
+});
+
 describe("understand --scope", () => {
   afterAll(() => {
     for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });

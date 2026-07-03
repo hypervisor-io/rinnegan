@@ -179,6 +179,17 @@ export function buildProgram(out: Out, cwd: string): Command {
     });
 
   program
+    .command("tests <symbol>")
+    .description("Tests that exercise a symbol")
+    .action(async (symbol: string) => {
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      const t = vx.testsFor(symbol);
+      out(json() ? JSON.stringify(t) : t.map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)");
+      vx.close();
+    });
+
+  program
     .command("lookup <name>")
     .description("Exact symbol fact, or an explicit NOT FOUND")
     .action(async (name: string) => {

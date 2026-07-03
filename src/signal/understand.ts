@@ -64,7 +64,8 @@ export function understand(
   const spine = extractSpine(store, anchors, { depth, maxNodes, include: inScope });
   const relevance = semantic.relevance(task);
   const testIntent = /\b(test|spec|coverage)s?\b/i.test(task);
-  const ranked = rankNodes(store, spine, relevance, { roles: store.roleByFile(), testIntent });
+  const roles = store.roleByFile();
+  const ranked = rankNodes(store, spine, relevance, { roles, testIntent });
 
   const fileCache = new Map<string, string | undefined>();
   const readSource = (path: string): string | undefined => {
@@ -83,7 +84,7 @@ export function understand(
   if ((opts.resolution ?? "harmonic") === "harmonic") {
     const header = [`# Rinnegan slice for: ${task}`, LEGEND, ""].join("\n");
     const inner = Math.max(200, tokenBudget - estimateTokens(header) - 30); // reserve fixed overhead
-    const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance });
+    const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance, roles });
     const text = [header, h.text].join("\n");
     return { text, facts: h.facts, tokensEstimate: estimateTokens(text), anchors };
   }
