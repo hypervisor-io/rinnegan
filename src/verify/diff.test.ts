@@ -176,4 +176,35 @@ describe("plain unified diff (no `diff --git` header)", () => {
     expect(files.map((f) => f.path)).toEqual(["first.txt", "second.txt"]);
     expect(files[0].hunks[0].lines).toEqual(["--- guard", " kept"]);
   });
+
+  it("does not mis-split when a `--` deletion is immediately followed by a `++` addition", () => {
+    // Deleting "-- something" and adding "++ somethingelse" render, with
+    // their unified-diff prefixes, as the raw lines "--- something" /
+    // "+++ somethingelse" — a perfect false match for the `--- `/`+++ `
+    // header pair, but only because they land back-to-back inside the hunk
+    // body. The `+++ ` lookahead alone can't disambiguate this case; only
+    // consuming the hunk by its declared line counts can.
+    const text = [
+      "--- a/first.txt",
+      "+++ b/first.txt",
+      "@@ -1,3 +1,3 @@",
+      " context1",
+      "--- something",
+      "+++ somethingelse",
+      " context2",
+    ].join("\n");
+    const files = parseUnifiedDiff(text);
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("first.txt");
+    expect(files[0].hunks).toHaveLength(1);
+    expect(files[0].hunks[0].lines).toEqual([
+      " context1",
+      "--- something",
+      "+++ somethingelse",
+      " context2",
+    ]);
+    const result = applyDiff("context1\n-- something\ncontext2", files[0].hunks);
+    expect(result).toBe("context1\n++ somethingelse\ncontext2");
+    expect(files[0].addedRanges).toEqual([[2, 2]]);
+  });
 });

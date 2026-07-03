@@ -26,6 +26,39 @@ function stripPrefix(path: string): string {
 }
 
 /**
+ * Given the index right after a hunk's `@@ -o,n +s,m @@` header line, plus
+ * the header's declared old/new line counts, returns the index of the first
+ * line after the hunk body. Consumes lines until `oldLines` old-side lines
+ * (`-` or context) and `newLines` new-side lines (`+` or context) have both
+ * been seen. A context line is a ` `-prefixed line or a fully empty line
+ * (blank context whose leading space got stripped in transport) and counts
+ * toward both sides; a `\` marker line ("\ No newline at end of file") is
+ * consumed but counts toward neither.
+ *
+ * This makes hunk bodies opaque to line-prefix boundary checks elsewhere: a
+ * `--- `/`+++ ` pair that happens to appear *inside* a hunk body (e.g.
+ * deleting "-- foo" and adding "++ bar" back-to-back renders as the raw
+ * lines "--- foo" / "+++ bar") is body content consumed by count here, not
+ * inspected for header-ness.
+ */
+function hunkBodyEnd(lines: string[], start: number, oldLines: number, newLines: number): number {
+  let oldSeen = 0;
+  let newSeen = 0;
+  let i = start;
+  while (i < lines.length && (oldSeen < oldLines || newSeen < newLines)) {
+    const tag = lines[i][0];
+    if (tag === "-") oldSeen++;
+    else if (tag === "+") newSeen++;
+    else if (tag !== "\\") {
+      oldSeen++;
+      newSeen++;
+    }
+    i++;
+  }
+  return i;
+}
+
+/**
  * Splits raw diff text into one block of lines per file section. Recognizes
  * two header styles:
  *  - `diff --git a/x b/y` (git-generated diffs)
@@ -34,23 +67,43 @@ function stripPrefix(path: string): string {
  * Once a `diff --git` line has been seen, later `--- ` lines are assumed to
  * be that header style's own file markers and are never treated as a new
  * boundary — a `--- ` line only opens a block when no `diff --git` header
- * has appeared yet AND the very next line starts with `+++ ` (a hunk
- * deletion line can itself start with `--- ` — e.g. deleting a SQL/Lua
- * comment "-- foo" renders as "--- foo" — so the `+++ ` lookahead is what
- * disambiguates a real header from hunk content).
+ * has appeared yet, the very next line starts with `+++ `, and the line
+ * after that starts with `@@ ` (a real plain file section is always
+ * `---`/`+++`/`@@`).
+ *
+ * Boundary detection only ever runs BETWEEN hunks: whenever a `@@ ... @@`
+ * header is seen, the scan jumps straight past its declared body (via
+ * hunkBodyEnd) instead of inspecting body lines one by one, so a hunk-body
+ * line that happens to look like a `--- `/`+++ ` header pair can never be
+ * mistaken for one.
  */
 function splitIntoFileBlocks(text: string): string[][] {
   const lines = text.split("\n");
   const starts: number[] = [];
   let sawGitHeader = false;
-  lines.forEach((l, i) => {
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    const hunkMatch = HUNK_HEADER.exec(l);
+    if (hunkMatch) {
+      const oldLines = hunkMatch[2] !== undefined ? Number(hunkMatch[2]) : 1;
+      const newLines = hunkMatch[4] !== undefined ? Number(hunkMatch[4]) : 1;
+      i = hunkBodyEnd(lines, i + 1, oldLines, newLines);
+      continue;
+    }
     if (l.startsWith("diff --git ")) {
       sawGitHeader = true;
       starts.push(i);
-    } else if (!sawGitHeader && l.startsWith("--- ") && lines[i + 1]?.startsWith("+++ ")) {
+    } else if (
+      !sawGitHeader &&
+      l.startsWith("--- ") &&
+      lines[i + 1]?.startsWith("+++ ") &&
+      lines[i + 2]?.startsWith("@@ ")
+    ) {
       starts.push(i);
     }
-  });
+    i++;
+  }
   const blocks: string[][] = [];
   for (let i = 0; i < starts.length; i++) {
     const from = starts[i];
@@ -81,24 +134,22 @@ function parseFileBlock(lines: string[]): DiffFile | null {
   const path = stripPrefix(deleted ? aPath : bPath);
 
   const hunks: DiffHunk[] = [];
-  let cur: DiffHunk | null = null;
   for (; i < lines.length; i++) {
-    const l = lines[i];
-    const m = HUNK_HEADER.exec(l);
-    if (m) {
-      if (cur) hunks.push(cur);
-      cur = {
-        oldStart: Number(m[1]),
-        oldLines: m[2] !== undefined ? Number(m[2]) : 1,
-        newStart: Number(m[3]),
-        newLines: m[4] !== undefined ? Number(m[4]) : 1,
-        lines: [],
-      };
-    } else if (cur) {
-      cur.lines.push(l);
-    }
+    const m = HUNK_HEADER.exec(lines[i]);
+    if (!m) continue; // between hunks — nothing to do until the next header
+    const oldLines = m[2] !== undefined ? Number(m[2]) : 1;
+    const newLines = m[4] !== undefined ? Number(m[4]) : 1;
+    const bodyStart = i + 1;
+    const bodyEnd = hunkBodyEnd(lines, bodyStart, oldLines, newLines);
+    hunks.push({
+      oldStart: Number(m[1]),
+      oldLines,
+      newStart: Number(m[3]),
+      newLines,
+      lines: lines.slice(bodyStart, bodyEnd),
+    });
+    i = bodyEnd - 1; // loop's i++ lands exactly on the next header (or past the end)
   }
-  if (cur) hunks.push(cur);
 
   return { path, hunks, addedRanges: computeAddedRanges(hunks), deleted, created };
 }
