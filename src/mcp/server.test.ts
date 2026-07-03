@@ -113,5 +113,6 @@ describe("MCP tools", () => {
     expect(text.split("\n")[0]).toMatch(/^# index: /);
     expect(text).toContain("beta");
     expect(text).not.toContain("alpha");
+    vx.close();
   });
 });

@@ -41,7 +41,7 @@ export function renderLookup(r: LookupResult): string {
 /** `verify`'s rendering, shared by the CLI and MCP surfaces: one line per finding, plus a summary line. */
 export function renderVerify(report: VerifyReport): string {
   const lines = report.findings.map((f) => `${f.file}:${f.line}  ${f.severity}  ${f.rule}  ${f.message}`);
-  const count = (sev: string) => report.findings.filter((f) => f.severity === sev).length;
+  const count = (sev: Finding["severity"]) => report.findings.filter((f) => f.severity === sev).length;
   lines.push(`${count("error")} error(s), ${count("warn")} warning(s), ${count("info")} info`);
   return lines.join("\n");
 }
@@ -266,6 +266,11 @@ export class Rinnegan {
 
   stats() {
     return { ...this.store.stats(), fingerprint: this.store.fingerprint() };
+  }
+
+  /** Cheap existence check (three COUNT queries, no fingerprint hashing) — use instead of `stats()` when all you need is "is there an index yet". */
+  hasIndex(): boolean {
+    return this.store.stats().nodes > 0;
   }
 
   /** Per-file inventory: role, language, symbol count, inbound edges, orphan status. Sorted by path. */

@@ -85,6 +85,7 @@ describe("Rinnegan library", () => {
     expect(s.reindexed).toBe(1);
     expect(vx.search("beta").length).toBeGreaterThan(0);
     expect(vx.search("alpha").length).toBe(0);
+    vx.close();
   });
 
   it("freshnessStamp wording", () => {

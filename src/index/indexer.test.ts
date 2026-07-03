@@ -65,6 +65,7 @@ describe("Indexer", () => {
     const s = await ix.sync(root);
     expect(s.reindexed).toBe(1);
     expect(store.searchFts("two", 5).length).toBeGreaterThan(0);
+    store.close();
   });
 
   it("sync removes a deleted file and is a no-op when nothing changed", async () => {
@@ -76,6 +77,7 @@ describe("Indexer", () => {
     expect(await ix.sync(root)).toEqual({ reindexed: 0, removed: 1 });
     expect(store.allFilePaths()).toEqual(["b.ts"]);
     expect(await ix.sync(root)).toEqual({ reindexed: 0, removed: 0 }); // no-op sweep
+    store.close();
   });
 
   it("indexAll assigns roles", async () => {
@@ -92,5 +94,6 @@ describe("Indexer", () => {
     expect(roles.get("src/util.ts")).toBe("library");
     expect(roles.get("src/util.test.ts")).toBe("test");
     expect(roles.get("package.json")).toBe("config");
+    store.close();
   });
 });

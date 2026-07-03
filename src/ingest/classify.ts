@@ -11,7 +11,18 @@ export interface ClassifyContext {
 const VENDOR_SEGS = new Set(["vendor", "third_party", "vendored"]);
 const GENERATED_RE = /@generated|DO NOT EDIT/;
 const TEST_PATH_RE = /(^|\/)(__tests__|tests?|spec)\/|\.(test|spec)\.[^./]+$|(^|\/)test_[^/]+\.py$|_test\.go$/;
-const TEST_FRAMEWORKS = new Set(["vitest", "jest", "@jest/globals", "mocha", "chai", "node:test", "ava", "tap", "supertest", "testing", "pytest", "unittest", "rspec", "minitest"]);
+// Scoped per-language so a bare import name isn't a test signal in the wrong
+// language (e.g. Go's stdlib "testing" package would otherwise false-positive
+// a TypeScript file that imports a module literally named "testing").
+const JS_TEST_FRAMEWORKS = new Set(["vitest", "jest", "@jest/globals", "mocha", "chai", "node:test", "ava", "tap", "supertest"]);
+const EMPTY_TEST_FRAMEWORKS = new Set<string>();
+const TEST_FRAMEWORKS: Record<string, Set<string>> = {
+  typescript: JS_TEST_FRAMEWORKS,
+  javascript: JS_TEST_FRAMEWORKS,
+  python: new Set(["pytest", "unittest"]),
+  go: new Set(["testing"]),
+  ruby: new Set(["rspec", "minitest"]),
+};
 const CONFIG_RE = /(^|\/)(tsconfig[^/]*\.json|\.eslintrc[^/]*|[^/]+\.config\.(js|ts|mjs|cjs|mts)|dockerfile|makefile)$/i;
 
 /**
@@ -30,7 +41,8 @@ export function classifyFile(
   const p = path.replace(/\\/g, "/");
   if (p.split("/").some((s) => VENDOR_SEGS.has(s.toLowerCase()))) return "vendored";
   if (GENERATED_RE.test(source.split("\n", 20).join("\n"))) return "generated";
-  if (TEST_PATH_RE.test(p) || imports.some((i) => TEST_FRAMEWORKS.has(i))) return "test";
+  const frameworks = TEST_FRAMEWORKS[language] ?? EMPTY_TEST_FRAMEWORKS;
+  if (TEST_PATH_RE.test(p) || imports.some((i) => frameworks.has(i))) return "test";
   if (ctx.entryTargets.has(p) || source.startsWith("#!")) return "entrypoint";
   const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
   const base = p.slice(p.lastIndexOf("/") + 1);

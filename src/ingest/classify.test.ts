@@ -42,6 +42,10 @@ describe("classifyFile", () => {
     expect(c("README.md", "", "markdown")).toBe("doc");
     expect(c("src/graph/store.ts")).toBe("library");
   });
+  it("test frameworks are scoped per-language — a TS import of a module literally named 'testing' isn't a test signal", () => {
+    expect(c("src/util.ts", "", "typescript", ["testing"])).toBe("library"); // "testing" is Go stdlib, not a JS test framework
+    expect(c("src/main.go", "", "go", ["testing"])).toBe("test");            // but it is one for Go
+  });
   it("buildClassifyContext reads package.json bin/main/exports", () => {
     const root = fixture({ "package.json": JSON.stringify({ main: "./dist/index.js", bin: { x: "./bin/x.js" } }) });
     const ctx2 = buildClassifyContext(root, ["package.json"]);

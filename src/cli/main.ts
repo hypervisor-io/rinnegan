@@ -9,6 +9,9 @@ import { VERSION } from "../version.js";
 
 type Out = (s: string) => void;
 
+// Generous ceiling for `git diff`/`git show` output on very large staged changes.
+const MAX_BUFFER = 64 * 1024 * 1024;
+
 function openIndexed(root: string): Rinnegan {
   return Rinnegan.open(root);
 }
@@ -22,14 +25,14 @@ function stagedInputs(root: string): VerifyInput[] {
   }
   const diffText = execFileSync("git", ["-C", root, "diff", "--cached", "--unified=0"], {
     encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: MAX_BUFFER,
   });
   return parseUnifiedDiff(diffText).map((f) => {
     let postImage: string | null = null;
     try {
       postImage = execFileSync("git", ["-C", root, "show", `:${f.path}`], {
         encoding: "utf8",
-        maxBuffer: 64 * 1024 * 1024,
+        maxBuffer: MAX_BUFFER,
         stdio: ["ignore", "pipe", "ignore"], // a staged deletion makes this fail — expected, not worth a scary stderr line
       });
     } catch {
@@ -41,7 +44,7 @@ function stagedInputs(root: string): VerifyInput[] {
 
 /** Reconcile the index with the working tree before answering. Never answer stale. */
 async function ensureIndexed(vx: Rinnegan): Promise<SyncStats> {
-  if (vx.stats().nodes === 0) {
+  if (!vx.hasIndex()) {
     await vx.indexAll();
     return { reindexed: 0, removed: 0 };
   }

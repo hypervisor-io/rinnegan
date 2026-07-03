@@ -125,16 +125,31 @@ export function createServer(vx: Rinnegan): Server {
     tools: listed.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   }));
 
+  // The SDK dispatches CallToolRequests concurrently — it doesn't wait for one
+  // handler to finish before starting the next. `vx.refresh()` below is a write
+  // path (it mutates the on-disk index), so two pipelined tool calls could
+  // otherwise interleave their sync() runs and race on getFileMeta/removeFile/
+  // setFileMeta across await boundaries. Chain every call through `queue` so
+  // requests run one at a time, in arrival order.
+  let queue: Promise<unknown> = Promise.resolve();
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = byName.get(req.params.name);
-    if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
-    const stamp = freshnessStamp(await vx.refresh());
-    try {
-      const text = await tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp);
-      return { content: [{ type: "text", text }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
-    }
+    const run = async () => {
+      const tool = byName.get(req.params.name);
+      if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
+      const stamp = freshnessStamp(await vx.refresh());
+      try {
+        const text = await tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp);
+        return { content: [{ type: "text", text }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
+      }
+    };
+    const result = queue.then(run, run);
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   });
 
   return server;
@@ -143,7 +158,7 @@ export function createServer(vx: Rinnegan): Server {
 /** Start the MCP server over stdio for a project root. projectPath is optional by design. */
 export async function runMcp(root: string = process.cwd()): Promise<void> {
   const vx = Rinnegan.open(root);
-  if (vx.stats().nodes === 0) await vx.indexAll();
+  if (!vx.hasIndex()) await vx.indexAll();
   const server = createServer(vx);
   await server.connect(new StdioServerTransport());
 }

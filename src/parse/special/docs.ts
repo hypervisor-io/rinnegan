@@ -2,11 +2,11 @@ import { dirname, join, normalize } from "node:path";
 import { nodeId } from "../../core/types.js";
 import type { GraphNode, GraphEdge } from "../../core/types.js";
 import type { ParseResult } from "../extract.js";
-import { LANG_EXT } from "../../ingest/scanner.js";
+import { LANG_EXT, DOC_EXT } from "../../ingest/scanner.js";
 
 // Extensions that make a backtick-quoted token read as a bare filename, not a
-// symbol mention (reuses the language-extension table so this list doesn't drift).
-const KNOWN_EXT = new Set([...Object.keys(LANG_EXT), ".md", ".mdx", ".markdown", ".rst", ".txt", ".json", ".yaml", ".yml", ".toml", ".lock"]);
+// symbol mention (reuses scanner.ts's tables so this list doesn't drift).
+const KNOWN_EXT = new Set([...Object.keys(LANG_EXT), ...DOC_EXT, ".json", ".yaml", ".yml", ".toml", ".lock"]);
 
 function looksLikeFilename(name: string): boolean {
   if (name.includes("/")) return true;
