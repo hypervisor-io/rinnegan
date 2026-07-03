@@ -4,6 +4,7 @@ import { Indexer, type IndexStats, type SyncStats } from "./index/indexer.js";
 import { SemanticEngine } from "./semantic/engine.js";
 import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
+import { languageOf } from "./ingest/scanner.js";
 import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
 export { VERSION } from "./version.js";
@@ -14,6 +15,15 @@ export type { UnderstandResult } from "./signal/understand.js";
 
 export interface RinneganOpts {
   dbPath?: string;
+}
+
+export interface InventoryRow {
+  path: string;
+  role: string;
+  language: string;
+  symbols: number; // non-file nodes in this file
+  inboundEdges: number; // edges into this file's nodes from other files' nodes
+  orphaned: boolean; // inboundEdges === 0 && role !== "entrypoint"
 }
 
 /** Human-readable freshness line prepended to slices by the CLI/MCP surfaces. */
@@ -152,6 +162,33 @@ export class Rinnegan {
 
   stats() {
     return this.store.stats();
+  }
+
+  /** Per-file inventory: role, language, symbol count, inbound edges, orphan status. Sorted by path. */
+  inventory(): InventoryRow[] {
+    const roles = this.store.roleByFile();
+    const nodes = this.store.allNodes();
+    const fileOf = new Map(nodes.map((n) => [n.id, n.filePath]));
+    const symbols = new Map<string, number>();
+    const inbound = new Map<string, number>();
+    for (const n of nodes) {
+      if (n.kind === "file") continue;
+      symbols.set(n.filePath, (symbols.get(n.filePath) ?? 0) + 1);
+    }
+    for (const e of this.store.allEdges()) {
+      const sf = fileOf.get(e.source), tf = fileOf.get(e.target);
+      if (sf && tf && sf !== tf) inbound.set(tf, (inbound.get(tf) ?? 0) + 1);
+    }
+    return [...roles.entries()].map(([path, role]) => {
+      const inb = inbound.get(path) ?? 0;
+      return {
+        path, role,
+        language: languageOf(path) ?? "unknown",
+        symbols: symbols.get(path) ?? 0,
+        inboundEdges: inb,
+        orphaned: inb === 0 && role !== "entrypoint",
+      };
+    });
   }
 
   close(): void {

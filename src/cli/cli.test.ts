@@ -50,6 +50,37 @@ describe("CLI", () => {
     expect(() => JSON.parse(lines.join(""))).not.toThrow();
   });
 
+  it("inventory --json emits one parseable JSON object per line; plain mode marks orphaned files", async () => {
+    // ponytail: identifiers kept subtoken-disjoint (runB/bootMain vs idleC) per the FTS quirk noted elsewhere.
+    const dir = fixture({
+      "package.json": JSON.stringify({ main: "./entry.ts" }),
+      "entry.ts": `import { runB } from "./used";\nexport function bootMain() { return runB(); }`,
+      "used.ts": `export function runB() { return 1; }`,
+      "unused.ts": `export function idleC() { return 2; }`,
+    });
+    await runCli(["index"], () => {}, dir);
+
+    const jsonLines: string[] = [];
+    await runCli(["--json", "inventory"], (s) => jsonLines.push(s), dir);
+    const rows = jsonLines
+      .join("\n")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(rows.length).toBe(4);
+    for (const r of rows) {
+      expect(Object.keys(r).sort()).toEqual(["inboundEdges", "language", "orphaned", "path", "role", "symbols"].sort());
+    }
+    expect(rows.find((r) => r.path === "unused.ts")?.orphaned).toBe(true);
+    expect(rows.find((r) => r.path === "entry.ts")?.orphaned).toBe(false);
+
+    const plainLines: string[] = [];
+    await runCli(["inventory"], (s) => plainLines.push(s), dir);
+    const plainText = plainLines.join("\n");
+    expect(plainText).toContain("unused.ts  library  typescript  symbols=1  in=0 [orphaned]");
+    expect(plainText).not.toMatch(/entry\.ts.*\[orphaned\]/);
+  });
+
   it("understand answers from a reconciled index and stamps freshness", async () => {
     const dir = fixture({ "a.ts": "export function alpha() {}" });
     await runCli(["index"], () => {}, dir);

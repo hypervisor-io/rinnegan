@@ -47,6 +47,23 @@ export function buildProgram(out: Out, cwd: string): Command {
     });
 
   program
+    .command("inventory")
+    .description("Per-file inventory: role, language, symbols, inbound edges, orphan status")
+    .action(async () => {
+      const vx = openIndexed(dir());
+      await ensureIndexed(vx);
+      const rows = vx.inventory();
+      out(
+        json()
+          ? rows.map((r) => JSON.stringify(r)).join("\n")
+          : rows
+              .map((r) => `${r.path}  ${r.role}  ${r.language}  symbols=${r.symbols}  in=${r.inboundEdges}${r.orphaned ? " [orphaned]" : ""}`)
+              .join("\n"),
+      );
+      vx.close();
+    });
+
+  program
     .command("understand <task...>")
     .description("Return the minimal, provenance-tagged signal slice for a task")
     .option("-b, --budget <n>", "token budget", "6000")

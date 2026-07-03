@@ -84,4 +84,31 @@ describe("Rinnegan library", () => {
     expect(freshnessStamp({ reindexed: 0, removed: 0 })).toBe("# index: fresh");
     expect(freshnessStamp({ reindexed: 2, removed: 1 })).toBe("# index: 2 file(s) reindexed, 1 removed just now");
   });
+
+  it("inventory: entrypoint with zero inbound is not orphaned, unused file is orphaned, used file has inbound edges", async () => {
+    // ponytail: identifiers kept subtoken-disjoint (runB/bootMain vs idleC) per the FTS quirk noted elsewhere in this file.
+    const root = fixture({
+      "package.json": JSON.stringify({ main: "./entry.ts" }),
+      "entry.ts": `import { runB } from "./used";\nexport function bootMain() { return runB(); }`,
+      "used.ts": `export function runB() { return 1; }`,
+      "unused.ts": `export function idleC() { return 2; }`,
+    });
+    const vx2 = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const rows = vx2.inventory();
+    vx2.close();
+
+    expect(rows.map((r) => r.path)).toEqual(["entry.ts", "package.json", "unused.ts", "used.ts"]);
+
+    const byPath = new Map(rows.map((r) => [r.path, r]));
+    expect(byPath.get("entry.ts")?.role).toBe("entrypoint");
+    expect(byPath.get("entry.ts")?.inboundEdges).toBe(0);
+    expect(byPath.get("entry.ts")?.orphaned).toBe(false);
+
+    expect(byPath.get("used.ts")?.inboundEdges).toBeGreaterThan(0);
+    expect(byPath.get("used.ts")?.orphaned).toBe(false);
+
+    expect(byPath.get("unused.ts")?.inboundEdges).toBe(0);
+    expect(byPath.get("unused.ts")?.orphaned).toBe(true);
+  });
 });
