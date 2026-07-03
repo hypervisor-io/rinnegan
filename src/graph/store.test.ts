@@ -32,6 +32,54 @@ describe("GraphStore", () => {
     g.close();
   });
 
+  it("removeFile downgrades a resolved cross-file 'calls' edge back to an unresolved boundary instead of deleting it (F2)", () => {
+    const g = GraphStore.open(":memory:");
+    g.insertNode({ id: "a_fn", kind: "function", qualifiedName: "charge", filePath: "a.ts", language: "ts", startLine: 1, endLine: 2, isExported: true });
+    g.insertNode({ id: "b_fn", kind: "function", qualifiedName: "useIt", filePath: "b.ts", language: "ts", startLine: 1, endLine: 2 });
+    // Simulates the post-resolveImports state: a resolved cross-file call.
+    g.insertEdge({ source: "b_fn", target: "a_fn", kind: "calls", line: 5, col: 3, provenance: "ast_inferred", confidence: 0.9, resolver: "ts-import", readWrite: "call", metadata: { crossFile: true, module: "./a" } });
+    g.setFileMeta("a.ts", { hash: "h", mtimeMs: 1, nodeIds: ["a_fn"], role: "library" });
+    g.setFileMeta("b.ts", { hash: "h", mtimeMs: 1, nodeIds: ["b_fn"], role: "library" });
+
+    g.removeFile("a.ts");
+
+    const downgraded = g.outgoing("b_fn").find((e) => e.kind === "calls");
+    expect(downgraded).toBeTruthy();
+    expect(downgraded!.provenance).toBe("unresolved");
+    const placeholder = g.getNode(downgraded!.target);
+    expect(placeholder?.qualifiedName).toBe("<unresolved>.charge");
+    expect(placeholder?.filePath).toBe("b.ts"); // lives in the caller's file, not the removed file
+    expect(placeholder?.kind).toBe("unresolved");
+    // Placeholder must go through insertNode so nodes_fts stays consistent.
+    expect(g.searchFts("charge", 5).map((n) => n.id)).toContain(downgraded!.target);
+    g.close();
+  });
+
+  it("removeFile does not wrongly downgrade non-'calls' edges into a shared pseudo node (e.g. manifest package hub)", () => {
+    const g = GraphStore.open(":memory:");
+    const hubId = "hub_lodash";
+    g.insertNode({ id: hubId, kind: "module", qualifiedName: "lodash", filePath: "<packages>", language: "package", startLine: 1, endLine: 1 });
+    g.insertNode({ id: "manifestA", kind: "file", qualifiedName: "<file>", filePath: "a/package.json", language: "manifest", startLine: 1, endLine: 1 });
+    g.insertNode({ id: "manifestB", kind: "file", qualifiedName: "<file>", filePath: "b/package.json", language: "manifest", startLine: 1, endLine: 1 });
+    g.insertEdge({ source: "manifestA", target: hubId, kind: "references", line: 1, col: 1, provenance: "ast_exact", confidence: 1, resolver: "manifest-dep", metadata: { dependsOn: true } });
+    g.insertEdge({ source: "manifestB", target: hubId, kind: "references", line: 1, col: 1, provenance: "ast_exact", confidence: 1, resolver: "manifest-dep", metadata: { dependsOn: true } });
+    // Mirrors indexer.ts: setFileMeta's node_ids = res.nodes.map(id), which
+    // includes the shared hub node under whichever manifest's extraction ran.
+    g.setFileMeta("a/package.json", { hash: "h", mtimeMs: 1, nodeIds: ["manifestA", hubId], role: "config" });
+    g.setFileMeta("b/package.json", { hash: "h", mtimeMs: 1, nodeIds: ["manifestB"], role: "config" });
+
+    g.removeFile("a/package.json");
+
+    // Pre-existing (out-of-scope) collateral loss of the hub node itself is
+    // unchanged by this fix — but critically, B's edge must NOT be rewritten
+    // into a bogus "<unresolved>.lodash" placeholder: only "calls" edges are
+    // eligible for downgrade, "references"/depends_on edges are not.
+    expect(g.getNode(hubId)).toBeUndefined();
+    expect(g.outgoing("manifestB")).toHaveLength(0);
+    expect(g.allNodes().some((n) => n.qualifiedName.startsWith("<unresolved>"))).toBe(false);
+    g.close();
+  });
+
   it("persists file role and lists roles", () => {
     const s = GraphStore.open(":memory:");
     s.setFileMeta("a.ts", { hash: "h", mtimeMs: 1, nodeIds: [], role: "test" });

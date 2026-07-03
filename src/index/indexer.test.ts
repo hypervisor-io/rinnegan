@@ -80,6 +80,58 @@ describe("Indexer", () => {
     store.close();
   });
 
+  it("F2: reindexing a file whose export is unchanged preserves inbound resolved cross-file call edges", async () => {
+    const root = fixture({
+      "a.ts": "export function fn() { return 1 }",
+      "b.ts": `import { fn } from "./a";\nexport function useIt() { return fn() }`,
+    });
+    const store = GraphStore.open(":memory:");
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+
+    const callerFiles = (name: string) => {
+      const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
+      if (!target) return [];
+      return store.incoming(target.id, ["calls"]).map((e) => store.getNode(e.source)?.filePath);
+    };
+    expect(callerFiles("fn")).toContain("b.ts");
+
+    // Touch a.ts's content (export kept) — mtime bump so gate 1 trips too.
+    writeFileSync(join(root, "a.ts"), "export function fn() { return 2 }");
+    const t = Date.now() + 5000;
+    utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
+    await ix.sync(root);
+
+    // Before the fix: removeFile(a.ts) destroyed b.ts's resolved calls edge and
+    // resolveImports never recreates an already-resolved (non-"unresolved")
+    // edge, so b.ts's caller relationship silently vanished.
+    expect(callerFiles("fn")).toContain("b.ts");
+    store.close();
+  });
+
+  it("F2: removing the exported symbol leaves an honest unresolved boundary instead of silent data loss", async () => {
+    const root = fixture({
+      "a.ts": "export function fn() { return 1 }",
+      "b.ts": `import { fn } from "./a";\nexport function useIt() { return fn() }`,
+    });
+    const store = GraphStore.open(":memory:");
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+
+    writeFileSync(join(root, "a.ts"), "function fn() { return 2 }"); // no longer exported
+    const t = Date.now() + 5000;
+    utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
+    await ix.sync(root);
+
+    expect(store.allNodes().some((n) => n.qualifiedName === "fn" && n.isExported)).toBe(false);
+
+    const bEdges = store.allEdges().filter((e) => e.kind === "calls" && store.getNode(e.source)?.filePath === "b.ts");
+    const boundary = bEdges.find((e) => e.provenance === "unresolved");
+    expect(boundary).toBeTruthy();
+    expect(store.getNode(boundary!.target)?.qualifiedName).toBe("<unresolved>.fn");
+    store.close();
+  });
+
   it("indexAll assigns roles", async () => {
     const root = fixture({
       "package.json": JSON.stringify({ main: "./src/index.ts" }),

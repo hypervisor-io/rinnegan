@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodeId } from "../core/types.js";
 import type { GraphNode, GraphEdge, EdgeKind } from "../core/types.js";
 import type { ImportRef } from "../parse/extract.js";
 
@@ -215,20 +216,78 @@ export class GraphStore {
     return new Map(rows.map((r) => [r.path, r.role]));
   }
 
-  /** Remove all nodes/edges that originated from a file (for re-index). */
+  /**
+   * Remove all nodes/edges that originated from a file (for re-index).
+   *
+   * A naive "delete every edge touching this file's node ids" also destroys
+   * INBOUND edges from other files — e.g. B's already-resolved `calls` edge
+   * into A's `charge()` — with nothing to recreate them: resolveImports only
+   * rewrites edges that are still `provenance: "unresolved"`, and B itself
+   * isn't being reparsed, so B's call knowledge would be lost until B is
+   * touched. Instead, edges whose target is in this file but whose source is
+   * NOT get downgraded back to the pre-resolution unresolved boundary the
+   * extractor would have emitted, so the next `resolveImports` pass (every
+   * caller of removeFile runs one) re-resolves it once A's replacement nodes
+   * land, or leaves an honest unresolved boundary if the symbol is gone.
+   *
+   * Scoped to `kind === "calls"` — the only edge kind resolveImports ever
+   * promotes cross-file, so it's the only kind safe to reconstruct this way.
+   * Other cross-file inbound edges (e.g. a manifest's shared package-hub node,
+   * whose kind is "references") fall through to the plain delete below,
+   * unchanged from prior behavior — synthesizing an "unresolved" placeholder
+   * for those would be dishonest, not a fix.
+   */
   removeFile(path: string): void {
     const meta = this.getFileMeta(path);
     if (!meta) return;
-    const del = this.db.transaction((ids: string[]) => {
-      for (const id of ids) {
+    const removedIds = new Set(meta.nodeIds);
+
+    interface Downgrade {
+      source: string; line: number; col: number; readWrite: GraphEdge["readWrite"];
+      name: string; sourceFile: string; language: string;
+    }
+    const downgrades: Downgrade[] = [];
+    for (const id of meta.nodeIds) {
+      const tgt = this.getNode(id);
+      if (!tgt) continue;
+      for (const e of this.incoming(id, ["calls"])) {
+        if (removedIds.has(e.source)) continue; // same-file — handled by the bulk delete below
+        const src = this.getNode(e.source);
+        if (!src) continue;
+        downgrades.push({
+          source: e.source, line: e.line, col: e.col, readWrite: e.readWrite,
+          name: tgt.qualifiedName, sourceFile: src.filePath, language: src.language,
+        });
+      }
+    }
+
+    const del = this.db.transaction(() => {
+      for (const id of meta.nodeIds) {
         this.stmt(`DELETE FROM nodes WHERE id = ?`).run(id);
         this.stmt(`DELETE FROM nodes_fts WHERE id = ?`).run(id);
         this.stmt(`DELETE FROM edges WHERE source = ? OR target = ?`).run(id, id);
       }
       this.stmt(`DELETE FROM files WHERE path = ?`).run(path);
       this.stmt(`DELETE FROM imports WHERE file = ?`).run(path);
+
+      for (const d of downgrades) {
+        const qn = `<unresolved>.${d.name}`;
+        const placeholderId = nodeId(d.sourceFile, qn);
+        // Same shape ensureUnresolved() in the extractors would emit — this
+        // node id/shape must round-trip through resolveImports's own
+        // `tgt.qualifiedName.replace(/^<unresolved>\./, "")` unwrap.
+        this.insertNode({
+          id: placeholderId, kind: "unresolved", qualifiedName: qn, filePath: d.sourceFile,
+          language: d.language, startLine: d.line, endLine: d.line,
+        });
+        this.insertEdge({
+          source: d.source, target: placeholderId, kind: "calls", line: d.line, col: d.col,
+          provenance: "unresolved", confidence: 0, resolver: "downgraded", readWrite: d.readWrite,
+          metadata: { boundary: "downgraded" },
+        });
+      }
     });
-    del(meta.nodeIds);
+    del();
   }
 
   /** Atomic batch mutation via a real SQLite transaction. */
