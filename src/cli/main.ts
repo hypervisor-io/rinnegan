@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { Rinnegan } from "../index.js";
+import { Rinnegan, freshnessStamp, type SyncStats } from "../index.js";
 import { VERSION } from "../version.js";
 
 type Out = (s: string) => void;
@@ -8,8 +8,13 @@ function openIndexed(root: string): Rinnegan {
   return Rinnegan.open(root);
 }
 
-async function ensureIndexed(vx: Rinnegan): Promise<void> {
-  if (vx.stats().nodes === 0) await vx.indexAll();
+/** Reconcile the index with the working tree before answering. Never answer stale. */
+async function ensureIndexed(vx: Rinnegan): Promise<SyncStats> {
+  if (vx.stats().nodes === 0) {
+    await vx.indexAll();
+    return { reindexed: 0, removed: 0 };
+  }
+  return vx.refresh();
 }
 
 /** Build the commander program. `out` and `cwd` are injectable for testing. */
@@ -47,9 +52,13 @@ export function buildProgram(out: Out, cwd: string): Command {
     .option("-b, --budget <n>", "token budget", "6000")
     .action(async (task: string[], opts: { budget: string }) => {
       const vx = openIndexed(dir());
-      await ensureIndexed(vx);
+      const fresh = await ensureIndexed(vx);
       const res = vx.understand(task.join(" "), { tokenBudget: Number(opts.budget) });
-      out(json() ? JSON.stringify({ tokensEstimate: res.tokensEstimate, anchors: res.anchors, text: res.text }) : res.text);
+      out(
+        json()
+          ? JSON.stringify({ tokensEstimate: res.tokensEstimate, anchors: res.anchors, text: res.text, fresh })
+          : [freshnessStamp(fresh), res.text].join("\n"),
+      );
       vx.close();
     });
 

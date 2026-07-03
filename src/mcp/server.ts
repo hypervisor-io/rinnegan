@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Rinnegan } from "../index.js";
+import { Rinnegan, freshnessStamp } from "../index.js";
 import { VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 
@@ -9,7 +9,7 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => string;
+  handler: (args: Record<string, unknown>, stamp: string) => string;
 }
 
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
@@ -29,7 +29,8 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
       },
       required: ["task"],
     },
-    handler: (a) => vx.understand(str(a.task), { tokenBudget: typeof a.budget === "number" ? a.budget : undefined }).text,
+    handler: (a, stamp) =>
+      [stamp, vx.understand(str(a.task), { tokenBudget: typeof a.budget === "number" ? a.budget : undefined }).text].join("\n"),
   };
 
   const search: ToolDef = {
@@ -93,8 +94,9 @@ export function createServer(vx: Rinnegan): Server {
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const tool = byName.get(req.params.name);
     if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
+    const stamp = freshnessStamp(await vx.refresh());
     try {
-      return { content: [{ type: "text", text: tool.handler((req.params.arguments ?? {}) as Record<string, unknown>) }] };
+      return { content: [{ type: "text", text: tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp) }] };
     } catch (e) {
       return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
     }
