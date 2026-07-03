@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Command } from "commander";
-import { Rinnegan, freshnessStamp, renderLookup, type SyncStats, type VerifyInput, type VerifyReport } from "../index.js";
+import { Rinnegan, freshnessStamp, renderLookup, renderVerify, type SyncStats, type VerifyInput } from "../index.js";
 import { parseUnifiedDiff } from "../verify/diff.js";
 import { VERSION } from "../version.js";
 
@@ -36,14 +36,6 @@ function stagedInputs(root: string): VerifyInput[] {
     }
     return { path: f.path, postImage, addedRanges: f.addedRanges };
   });
-}
-
-/** One line per finding — `<file>:<line>  <severity>  <rule>  <message>` — plus a summary line. */
-function renderVerify(report: VerifyReport): string {
-  const lines = report.findings.map((f) => `${f.file}:${f.line}  ${f.severity}  ${f.rule}  ${f.message}`);
-  const count = (sev: string) => report.findings.filter((f) => f.severity === sev).length;
-  lines.push(`${count("error")} error(s), ${count("warn")} warning(s), ${count("info")} info`);
-  return lines.join("\n");
 }
 
 /** Reconcile the index with the working tree before answering. Never answer stale. */
@@ -229,7 +221,7 @@ export function buildProgram(out: Out, cwd: string): Command {
 
   program
     .command("mcp")
-    .description("Start the MCP server over stdio (single 'understand' tool)")
+    .description("Start the MCP server over stdio (understand, lookup, verify)")
     .action(async () => {
       const { runMcp } = await import("../mcp/server.js");
       await runMcp(dir());

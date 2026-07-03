@@ -1,7 +1,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Rinnegan, freshnessStamp } from "../index.js";
+import { Rinnegan, freshnessStamp, renderLookup, renderVerify } from "../index.js";
 import { VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 
@@ -9,7 +9,7 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>, stamp: string) => string;
+  handler: (args: Record<string, unknown>, stamp: string) => string | Promise<string>;
 }
 
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
@@ -72,9 +72,26 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
     handler: (a) => vx.impact(str(a.symbol)).map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)",
   };
 
-  const all = [understand, search, deps, refs, callers, impact];
+  const lookup: ToolDef = {
+    name: "lookup",
+    description:
+      "Exact symbol lookup. Returns the ground-truth signature and location, or an explicit NOT FOUND. " +
+      "Call before referencing any symbol you have not seen in a slice.",
+    inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    handler: (a) => renderLookup(vx.lookup(str(a.name))),
+  };
+  const verify: ToolDef = {
+    name: "verify",
+    description:
+      "Fact-check a unified diff against the code graph BEFORE applying it: unknown symbols (hallucinations), " +
+      "real signatures of called functions, blast radius of edited definitions.",
+    inputSchema: { type: "object", properties: { diff: { type: "string" } }, required: ["diff"] },
+    handler: async (a) => renderVerify(await vx.verify(str(a.diff))),
+  };
+
+  const all = [understand, search, deps, refs, callers, impact, lookup, verify];
   const exposeAll = process.env.RINNEGAN_MCP_TOOLS === "all";
-  return { listed: exposeAll ? all : [understand], all };
+  return { listed: exposeAll ? all : [understand, lookup, verify], all };
 }
 
 /** Create the MCP server (low-level Server → spec-correct stdio framing via the SDK). */
@@ -96,7 +113,8 @@ export function createServer(vx: Rinnegan): Server {
     if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
     const stamp = freshnessStamp(await vx.refresh());
     try {
-      return { content: [{ type: "text", text: tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp) }] };
+      const text = await tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp);
+      return { content: [{ type: "text", text }] };
     } catch (e) {
       return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
     }

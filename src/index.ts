@@ -34,6 +34,14 @@ export function renderLookup(r: LookupResult): string {
   return [r.message, "did you mean:", ...r.suggestions.map((s) => `${s.file}:${s.line}  ${s.name}`)].join("\n");
 }
 
+/** `verify`'s rendering, shared by the CLI and MCP surfaces: one line per finding, plus a summary line. */
+export function renderVerify(report: VerifyReport): string {
+  const lines = report.findings.map((f) => `${f.file}:${f.line}  ${f.severity}  ${f.rule}  ${f.message}`);
+  const count = (sev: string) => report.findings.filter((f) => f.severity === sev).length;
+  lines.push(`${count("error")} error(s), ${count("warn")} warning(s), ${count("info")} info`);
+  return lines.join("\n");
+}
+
 export interface InventoryRow {
   path: string;
   role: string;
