@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { GraphStore } from "../graph/store.js";
 import { Indexer } from "./indexer.js";
 
@@ -11,7 +11,10 @@ const fixtureDirs: string[] = [];
 /** Fresh temp dir seeded with the given relative-path → content files. */
 function fixture(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "rinnegan-idx-"));
-  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), content);
+  }
   fixtureDirs.push(dir);
   return dir;
 }
@@ -73,5 +76,21 @@ describe("Indexer", () => {
     expect(await ix.sync(root)).toEqual({ reindexed: 0, removed: 1 });
     expect(store.allFilePaths()).toEqual(["b.ts"]);
     expect(await ix.sync(root)).toEqual({ reindexed: 0, removed: 0 }); // no-op sweep
+  });
+
+  it("indexAll assigns roles", async () => {
+    const root = fixture({
+      "package.json": JSON.stringify({ main: "./src/index.ts" }),
+      "src/index.ts": "export function main() {}",
+      "src/util.ts": "export function u() {}",
+      "src/util.test.ts": "import { u } from './util.js'; u();",
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const roles = store.roleByFile();
+    expect(roles.get("src/index.ts")).toBe("entrypoint");
+    expect(roles.get("src/util.ts")).toBe("library");
+    expect(roles.get("src/util.test.ts")).toBe("test");
+    expect(roles.get("package.json")).toBe("config");
   });
 });
