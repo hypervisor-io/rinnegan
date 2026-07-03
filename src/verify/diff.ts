@@ -40,13 +40,35 @@ function stripPrefix(path: string): string {
  * deleting "-- foo" and adding "++ bar" back-to-back renders as the raw
  * lines "--- foo" / "+++ bar") is body content consumed by count here, not
  * inspected for header-ness.
+ *
+ * Guard against over-declared counts (a header claiming more lines than the
+ * hunk actually has — common in LLM-authored patches): before consuming each
+ * line, hard-stop if it's structurally impossible as body content — either
+ * its first char isn't one of `-`, `+`, ` `, `\` or empty (rules out a stray
+ * `diff --git `/untagged `@@ ` header line getting counted as context), or
+ * it's the unambiguous start of the next file's plain header (a `--- ` line
+ * followed by `+++ ` followed by an untagged `@@ ` header — this triple can't
+ * occur inside a truthful hunk body, unlike a lone `--- `/`+++ ` pair).
+ *
+ * Once the body ends, any immediately-following "\ No newline at end of
+ * file" marker line(s) are folded in too — they belong to the line before
+ * them and would otherwise be silently dropped.
  */
 function hunkBodyEnd(lines: string[], start: number, oldLines: number, newLines: number): number {
   let oldSeen = 0;
   let newSeen = 0;
   let i = start;
   while (i < lines.length && (oldSeen < oldLines || newSeen < newLines)) {
-    const tag = lines[i][0];
+    const line = lines[i];
+    const tag = line[0];
+    if (tag !== "-" && tag !== "+" && tag !== " " && tag !== "\\" && tag !== undefined) break;
+    if (
+      line.startsWith("--- ") &&
+      lines[i + 1]?.startsWith("+++ ") &&
+      HUNK_HEADER.test(lines[i + 2] ?? "")
+    ) {
+      break;
+    }
     if (tag === "-") oldSeen++;
     else if (tag === "+") newSeen++;
     else if (tag !== "\\") {
@@ -55,6 +77,7 @@ function hunkBodyEnd(lines: string[], start: number, oldLines: number, newLines:
     }
     i++;
   }
+  while (i < lines.length && lines[i].startsWith("\\")) i++;
   return i;
 }
 

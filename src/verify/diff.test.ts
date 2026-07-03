@@ -208,3 +208,70 @@ describe("plain unified diff (no `diff --git` header)", () => {
     expect(files[0].addedRanges).toEqual([[2, 2]]);
   });
 });
+
+describe("malformed over-declared hunks (bug repro)", () => {
+  it("stops at the next file's `diff --git` header instead of swallowing it", () => {
+    // Header claims 10/10 lines but only 2 real body lines follow — an
+    // over-declared count, common in LLM-authored patches.
+    const text = [
+      "diff --git a/first.txt b/first.txt",
+      "--- a/first.txt",
+      "+++ b/first.txt",
+      "@@ -1,10 +1,10 @@",
+      " line1",
+      "-line2",
+      "diff --git a/next.txt b/next.txt",
+      "--- a/next.txt",
+      "+++ b/next.txt",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    const files = parseUnifiedDiff(text);
+    expect(files).toHaveLength(2);
+    expect(files.map((f) => f.path)).toEqual(["first.txt", "next.txt"]);
+    expect(files[0].hunks[0].lines).toEqual([" line1", "-line2"]);
+    expect(files[1].hunks).toHaveLength(1);
+    expect(files[1].hunks[0].lines).toEqual(["-old", "+new"]);
+  });
+
+  it("stops at the next file's plain `--- `/`+++ `/`@@ ` header triple", () => {
+    const text = [
+      "--- a/first.txt",
+      "+++ b/first.txt",
+      "@@ -1,10 +1,10 @@",
+      " line1",
+      "-line2",
+      "--- a/next.txt",
+      "+++ b/next.txt",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    const files = parseUnifiedDiff(text);
+    expect(files).toHaveLength(2);
+    expect(files.map((f) => f.path)).toEqual(["first.txt", "next.txt"]);
+    expect(files[0].hunks[0].lines).toEqual([" line1", "-line2"]);
+    expect(files[1].hunks[0].lines).toEqual(["-old", "+new"]);
+  });
+
+  it("retains a trailing `\\ No newline at end of file` marker in hunk.lines", () => {
+    const text = [
+      "--- a/file.txt",
+      "+++ b/file.txt",
+      "@@ -1,2 +1,2 @@",
+      " line1",
+      "-line2",
+      "+line2-changed",
+      "\\ No newline at end of file",
+    ].join("\n");
+    const files = parseUnifiedDiff(text);
+    expect(files).toHaveLength(1);
+    expect(files[0].hunks[0].lines).toEqual([
+      " line1",
+      "-line2",
+      "+line2-changed",
+      "\\ No newline at end of file",
+    ]);
+  });
+});
