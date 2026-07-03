@@ -1,12 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { GraphStore } from "../graph/store.js";
 import { Indexer } from "../index/indexer.js";
 import { SemanticEngine } from "../semantic/engine.js";
 import { understand } from "./understand.js";
 import { minifyBlock } from "./render.js";
+import { rankNodes } from "./rank.js";
+import { Rinnegan } from "../index.js";
+
+const fixtureDirs: string[] = [];
+
+/** Fresh temp dir seeded with the given relative-path → content files. */
+function fixture(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "rinnegan-und-fx-"));
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(dir, name)), { recursive: true });
+    writeFileSync(join(dir, name), content);
+  }
+  fixtureDirs.push(dir);
+  return dir;
+}
 
 describe("minifyBlock", () => {
   it("dedents, elides blank lines, keeps line numbers", () => {
@@ -109,5 +124,51 @@ describe("harmonic multi-resolution", () => {
   it("flat mode omits the tiers (back-compat)", () => {
     const r = understand(hstore, hsem, "user login", { root: hroot, resolution: "flat" });
     expect(r.text).not.toContain("# MAP");
+  });
+});
+
+describe("role-aware ranking", () => {
+  afterAll(() => {
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  it("down-ranks test files unless task has test intent", async () => {
+    const root = fixture({
+      "src/pay.ts": "export function charge() {}",
+      "src/pay.test.ts": "export function charge() {}",
+    });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+    const slice = vx.understand("charge payment");
+    expect(slice.text.indexOf("src/pay.ts")).toBeLessThan(slice.text.indexOf("src/pay.test.ts"));
+    const testSlice = vx.understand("fix the charge test");
+    expect(testSlice.text).toContain("src/pay.test.ts");
+    vx.close();
+  });
+
+  // The text-level assertion above passes even without role weighting: the two
+  // "charge" symbols get slightly different relevance scores from the semantic
+  // engine as an incidental side effect, not from role logic. Pin the real
+  // behavior directly on rankNodes with equal relevance so this test actually
+  // fails without the ROLE_WEIGHT multiplier (and passes once it's applied).
+  it("rankNodes multiplies ROLE_WEIGHT into score, with a test-intent escape hatch", async () => {
+    const root = fixture({
+      "src/pay.ts": "export function charge() {}",
+      "src/pay.test.ts": "export function charge() {}",
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const ids = new Set(store.allNodes().filter((n) => n.kind === "function").map((n) => n.id));
+    const relevance = new Map([...ids].map((id) => [id, 0.5])); // equal relevance — isolates role weighting
+
+    const ranked = rankNodes(store, ids, relevance, { roles: store.roleByFile() });
+    const byPath = (r: typeof ranked) => new Map(r.map((x) => [x.node.filePath, x.score]));
+    const scores = byPath(ranked);
+    expect(scores.get("src/pay.ts")!).toBeGreaterThan(scores.get("src/pay.test.ts")!);
+
+    const rankedIntent = rankNodes(store, ids, relevance, { roles: store.roleByFile(), testIntent: true });
+    const scoresIntent = byPath(rankedIntent);
+    expect(scoresIntent.get("src/pay.test.ts")!).toBe(scoresIntent.get("src/pay.ts")!); // test escapes to roleW 1.0, ties library
+    store.close();
   });
 });

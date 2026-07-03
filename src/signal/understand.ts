@@ -51,7 +51,8 @@ export function understand(
 
   const spine = extractSpine(store, anchors, { depth, maxNodes });
   const relevance = semantic.relevance(task);
-  const ranked = rankNodes(store, spine, relevance);
+  const testIntent = /\b(test|spec|coverage)s?\b/i.test(task);
+  const ranked = rankNodes(store, spine, relevance, { roles: store.roleByFile(), testIntent });
 
   const fileCache = new Map<string, string | undefined>();
   const readSource = (path: string): string | undefined => {
