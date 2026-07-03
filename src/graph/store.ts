@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { nodeId } from "../core/types.js";
 import type { GraphNode, GraphEdge, EdgeKind } from "../core/types.js";
 import type { ImportRef } from "../parse/extract.js";
+import { resolveModulePath } from "../resolution/module_path.js";
 
 const SCHEMA = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
 
@@ -242,11 +243,20 @@ export class GraphStore {
     if (!meta) return;
     const removedIds = new Set(meta.nodeIds);
 
+    // For attributing a downgraded `default`-import placeholder: mirrors
+    // resolveImports's own default heuristic (a file with exactly one
+    // exported symbol — that symbol is "the" default), computed once here
+    // against the file being removed.
+    const exportedInFile = meta.nodeIds
+      .map((id) => this.getNode(id))
+      .filter((n): n is GraphNode => !!n && !!n.isExported);
+
     interface Downgrade {
       source: string; line: number; col: number; readWrite: GraphEdge["readWrite"];
       name: string; sourceFile: string; language: string;
     }
     const downgrades: Downgrade[] = [];
+    const importsByCallerFile = new Map<string, ImportRef[]>();
     for (const id of meta.nodeIds) {
       const tgt = this.getNode(id);
       if (!tgt) continue;
@@ -254,9 +264,26 @@ export class GraphStore {
         if (removedIds.has(e.source)) continue; // same-file — handled by the bulk delete below
         const src = this.getNode(e.source);
         if (!src) continue;
+
+        // Name the placeholder from the CALLER's import row, not the
+        // target's declared name — resolveImports re-resolves by matching
+        // the caller's import *localName* (imports.ts:59-60). An aliased
+        // (`import { charge as doCharge }`) or default import under a
+        // different local name would otherwise never re-match, permanently
+        // stranding the edge as unresolved.
+        let imports = importsByCallerFile.get(src.filePath);
+        if (!imports) importsByCallerFile.set(src.filePath, (imports = this.getImports(src.filePath)));
+        const imp = imports.find(
+          (i) =>
+            resolveModulePath(src.filePath, i.moduleSpec, this) === path &&
+            (i.importedName === tgt.qualifiedName ||
+              (i.importedName === "default" && exportedInFile.length === 1 && exportedInFile[0].id === tgt.id)),
+        );
+
         downgrades.push({
           source: e.source, line: e.line, col: e.col, readWrite: e.readWrite,
-          name: tgt.qualifiedName, sourceFile: src.filePath, language: src.language,
+          name: imp ? imp.localName : tgt.qualifiedName, // fallback: no import row matched (e.g. same-language global heuristics)
+          sourceFile: src.filePath, language: src.language,
         });
       }
     }

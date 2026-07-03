@@ -132,6 +132,66 @@ describe("Indexer", () => {
     store.close();
   });
 
+  it("F2: aliased named import survives reindex of the target file (caller's localName differs from the declared name)", async () => {
+    const root = fixture({
+      "a.ts": "export function charge() { return 1 }",
+      "b.ts": `import { charge as doCharge } from "./a";\nexport function useIt() { return doCharge() }`,
+    });
+    const store = GraphStore.open(":memory:");
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+
+    const callerFiles = (name: string) => {
+      const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
+      if (!target) return [];
+      return store.incoming(target.id, ["calls"]).map((e) => store.getNode(e.source)?.filePath);
+    };
+    expect(callerFiles("charge")).toContain("b.ts");
+
+    // Touch a.ts's content (export kept) — mtime bump so gate 1 trips too.
+    writeFileSync(join(root, "a.ts"), "export function charge() { return 2 }");
+    const t = Date.now() + 5000;
+    utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
+    await ix.sync(root);
+
+    // Before the fix: removeFile(a.ts) named the downgrade placeholder after
+    // the TARGET's declared name ("charge"), but resolveImports re-resolves by
+    // matching the CALLER's import *localName* ("doCharge") — they never
+    // matched, so the edge stayed a permanently-unresolved boundary and b.ts
+    // was permanently lost as a caller.
+    expect(callerFiles("charge")).toContain("b.ts");
+    store.close();
+  });
+
+  it("F2: default import under a different local name survives reindex of the target file", async () => {
+    const root = fixture({
+      "a.ts": "export default function pay() { return 1 }",
+      "b.ts": `import settle from "./a";\nexport function useIt() { return settle() }`,
+    });
+    const store = GraphStore.open(":memory:");
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+
+    const callerFiles = (name: string) => {
+      const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
+      if (!target) return [];
+      return store.incoming(target.id, ["calls"]).map((e) => store.getNode(e.source)?.filePath);
+    };
+    expect(callerFiles("pay")).toContain("b.ts");
+
+    writeFileSync(join(root, "a.ts"), "export default function pay() { return 2 }");
+    const t = Date.now() + 5000;
+    utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
+    await ix.sync(root);
+
+    // Same class of bug as the aliased-named-import case, via the "default"
+    // import path: the caller's local name ("settle") never equals the
+    // target's declared name ("pay"), so the placeholder must be named from
+    // the caller's import row, not `tgt.qualifiedName`.
+    expect(callerFiles("pay")).toContain("b.ts");
+    store.close();
+  });
+
   it("indexAll assigns roles", async () => {
     const root = fixture({
       "package.json": JSON.stringify({ main: "./src/index.ts" }),
