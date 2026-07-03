@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { GraphStore } from "./store.js";
 
 describe("GraphStore", () => {
@@ -35,5 +36,24 @@ describe("GraphStore", () => {
     s.setFileMeta("a.ts", { hash: "h", mtimeMs: 1, nodeIds: [], role: "test" });
     expect(s.getFileMeta("a.ts")!.role).toBe("test");
     expect(s.roleByFile().get("a.ts")).toBe("test");
+  });
+
+  it("fingerprint pins the sha256(path + NUL + hash + NL, sorted by path) algorithm and is insertion-order independent", () => {
+    const expected = createHash("sha256").update("a.ts\0h1\n").update("b.ts\0h2\n").digest("hex");
+
+    const forward = GraphStore.open(":memory:");
+    forward.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
+    forward.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
+    expect(forward.fingerprint()).toBe(expected);
+
+    const reverse = GraphStore.open(":memory:");
+    reverse.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
+    reverse.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
+    expect(reverse.fingerprint()).toBe(expected);
+  });
+
+  it("fingerprint of an empty index is sha256 of empty input", () => {
+    const s = GraphStore.open(":memory:");
+    expect(s.fingerprint()).toBe(createHash("sha256").update("").digest("hex"));
   });
 });

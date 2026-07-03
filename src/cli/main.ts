@@ -73,7 +73,7 @@ export function buildProgram(out: Out, cwd: string): Command {
     .action(() => {
       const vx = Rinnegan.open(dir());
       const s = vx.stats();
-      out(json() ? JSON.stringify(s) : `nodes=${s.nodes} edges=${s.edges} files=${s.files}`);
+      out(json() ? JSON.stringify(s) : `nodes=${s.nodes} edges=${s.edges} files=${s.files} fingerprint=${s.fingerprint.slice(0, 16)}`);
       vx.close();
     });
 

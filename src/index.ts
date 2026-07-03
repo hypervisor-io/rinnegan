@@ -265,7 +265,7 @@ export class Rinnegan {
   }
 
   stats() {
-    return this.store.stats();
+    return { ...this.store.stats(), fingerprint: this.store.fingerprint() };
   }
 
   /** Per-file inventory: role, language, symbol count, inbound edges, orphan status. Sorted by path. */

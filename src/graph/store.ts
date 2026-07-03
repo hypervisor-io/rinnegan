@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -253,5 +254,13 @@ export class GraphStore {
     const e = (this.stmt(`SELECT count(*) c FROM edges`).get() as { c: number }).c;
     const f = (this.stmt(`SELECT count(*) c FROM files`).get() as { c: number }).c;
     return { nodes: n, edges: e, files: f };
+  }
+
+  /** Corpus identity: same fingerprint ⇒ same index bytes (determinism promise). */
+  fingerprint(): string {
+    const h = createHash("sha256");
+    const rows = this.stmt(`SELECT path, hash FROM files ORDER BY path`).all() as { path: string; hash: string }[];
+    for (const r of rows) h.update(`${r.path}\0${r.hash}\n`);
+    return h.digest("hex");
   }
 }

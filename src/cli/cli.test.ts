@@ -242,6 +242,38 @@ describe("CLI", () => {
     expect(hintLines.join("\n")).toContain("--stale");
   });
 
+  it("status fingerprint is stable across unchanged reindexes and changes when a file's content changes; plain output truncates to 16 hex chars", async () => {
+    const dir = fixture({ "fizz.ts": "export function fizzOne() { return 1; }" });
+    await runCli(["index"], () => {}, dir);
+
+    const first: string[] = [];
+    await runCli(["--json", "status"], (s) => first.push(s), dir);
+    const s1 = JSON.parse(first.join(""));
+    expect(typeof s1.fingerprint).toBe("string");
+    expect(s1.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+
+    await runCli(["index"], () => {}, dir); // re-index, fixture unchanged
+
+    const second: string[] = [];
+    await runCli(["--json", "status"], (s) => second.push(s), dir);
+    const s2 = JSON.parse(second.join(""));
+    expect(s2.fingerprint).toBe(s1.fingerprint);
+
+    writeFileSync(join(dir, "fizz.ts"), "export function fizzTwo() { return 2; }");
+    const t = Date.now() + 5000;
+    utimesSync(join(dir, "fizz.ts"), new Date(t), new Date(t));
+    await runCli(["index"], () => {}, dir);
+
+    const third: string[] = [];
+    await runCli(["--json", "status"], (s) => third.push(s), dir);
+    const s3 = JSON.parse(third.join(""));
+    expect(s3.fingerprint).not.toBe(s1.fingerprint);
+
+    const plain: string[] = [];
+    await runCli(["status"], (s) => plain.push(s), dir);
+    expect(plain.join("\n")).toBe(`nodes=${s3.nodes} edges=${s3.edges} files=${s3.files} fingerprint=${s3.fingerprint.slice(0, 16)}`);
+  });
+
   it("verify --staged reads the git index directly (edited + deleted files)", async () => {
     const dir = fixture({});
     execFileSync("git", ["init", "-q"], { cwd: dir });
