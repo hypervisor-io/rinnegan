@@ -22,7 +22,7 @@ export function renderMapMarkdown(m: MapResult): string {
 
 /**
  * `map`'s mermaid rendering: `flowchart LR` with one node per domain and one edge per
- * DomainEdge. Node ids are sanitized to [A-Za-z0-9_] and prefixed with the domain's
+ * DomainEdge. Node ids are the sanitized [A-Za-z0-9_] name suffixed with the domain's
  * index, which trivially guarantees uniqueness even when two domains render to the
  * same display name (a real label-collision case — see domains.ts); the display
  * label is kept verbatim via `id["name"]` so the collision stays visible.
@@ -31,7 +31,7 @@ export function renderMapMermaid(m: MapResult): string {
   const lines = ["flowchart LR"];
   const idByName = new Map<string, string>(); // first domain with a given name wins edge endpoints
   m.domains.forEach((d, i) => {
-    const id = `n${i}_${d.name.replace(/[^A-Za-z0-9_]/g, "_")}`;
+    const id = `${d.name.replace(/[^A-Za-z0-9_]/g, "_")}_${i}`;
     if (!idByName.has(d.name)) idByName.set(d.name, id);
     lines.push(`  ${id}["${d.name}"]`);
   });
