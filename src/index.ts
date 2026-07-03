@@ -1,18 +1,71 @@
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "./graph/store.js";
-import { Indexer, type IndexStats } from "./index/indexer.js";
+import { Indexer, type IndexStats, type SyncStats } from "./index/indexer.js";
 import { SemanticEngine } from "./semantic/engine.js";
 import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
+import { languageOf } from "./ingest/scanner.js";
+import { parseUnifiedDiff, applyDiff } from "./verify/diff.js";
+import { verifyChanges, sortFindings, type VerifyReport, type VerifyInput, type Finding } from "./verify/verify.js";
+import { computeDomains } from "./domains/domains.js";
+import type { MapResult } from "./domains/render.js";
 import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
 export { VERSION } from "./version.js";
 export type { GraphNode, GraphEdge, Provenance, ReadWrite, NodeKind, EdgeKind } from "./core/types.js";
 export type { IndexStats } from "./index/indexer.js";
+export { type SyncStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
+export type { VerifyReport, VerifyInput, Finding, FindingRule } from "./verify/verify.js";
+export type { Domain, DomainEdge } from "./domains/domains.js";
+export type { MapResult } from "./domains/render.js";
 
 export interface RinneganOpts {
   dbPath?: string;
+}
+
+export type LookupResult =
+  | { found: true; node: GraphNode; callers: number }
+  | { found: false; message: string; suggestions: { name: string; file: string; line: number }[] };
+
+/** `lookup`'s rendering, shared by the CLI and MCP surfaces. */
+export function renderLookup(r: LookupResult): string {
+  if (r.found) {
+    return `${r.node.qualifiedName}  [${r.node.kind}]\n${r.node.signature ?? "(no signature)"}\n${r.node.filePath}:${r.node.startLine}\ncallers: ${r.callers}`;
+  }
+  if (r.suggestions.length === 0) return r.message;
+  return [r.message, "did you mean:", ...r.suggestions.map((s) => `${s.file}:${s.line}  ${s.name}`)].join("\n");
+}
+
+/** `verify`'s rendering, shared by the CLI and MCP surfaces: one line per finding, plus a summary line. */
+export function renderVerify(report: VerifyReport): string {
+  const lines = report.findings.map((f) => `${f.file}:${f.line}  ${f.severity}  ${f.rule}  ${f.message}`);
+  const count = (sev: Finding["severity"]) => report.findings.filter((f) => f.severity === sev).length;
+  lines.push(`${count("error")} error(s), ${count("warn")} warning(s), ${count("info")} info`);
+  return lines.join("\n");
+}
+
+export interface StaleDoc {
+  docPath: string;
+  line: number;
+  name: string;
+}
+
+export interface InventoryRow {
+  path: string;
+  role: string;
+  language: string;
+  symbols: number; // non-file nodes in this file
+  inboundEdges: number; // edges into this file's nodes from other files' nodes
+  orphaned: boolean; // inboundEdges === 0 && role !== "entrypoint"
+}
+
+/** Human-readable freshness line prepended to slices by the CLI/MCP surfaces. */
+export function freshnessStamp(s: SyncStats): string {
+  return s.reindexed + s.removed === 0
+    ? "# index: fresh"
+    : `# index: ${s.reindexed} file(s) reindexed, ${s.removed} removed just now`;
 }
 
 /** The Rinnegan public API — the shared core behind the CLI and MCP server. */
@@ -41,8 +94,33 @@ export class Rinnegan {
     return this.semantic;
   }
 
-  understand(task: string, opts: Partial<UnderstandOpts> = {}): UnderstandResult {
-    return understand(this.store, this.sem(), task, { root: this.root, ...opts });
+  /**
+   * `opts.scope` names a domain from `computeDomains` (e.g. "auth") and is resolved
+   * to that domain's file set before delegating to the signal-level `understand`.
+   * Two distinct domains can share a display name (a directory-prefix collision
+   * after label propagation) — when `scope` matches more than one, their file
+   * sets are unioned rather than picking one arbitrarily.
+   */
+  understand(task: string, opts: Partial<UnderstandOpts> & { scope?: string } = {}): UnderstandResult {
+    const { scope, ...rest } = opts;
+    let scopeFiles = rest.scopeFiles;
+    if (typeof scope === "string") {
+      const { domains } = computeDomains(this.store);
+      const matches = domains.filter((d) => d.name === scope);
+      if (matches.length === 0) {
+        const available = [...new Set(domains.map((d) => d.name))].join(", ");
+        throw new Error(`unknown domain '${scope}' — available: ${available}`);
+      }
+      scopeFiles = new Set(matches.flatMap((d) => d.files));
+    }
+    return understand(this.store, this.sem(), task, { root: this.root, ...rest, scopeFiles });
+  }
+
+  /** Reconcile index with the working tree. Answers must never be stale. */
+  async refresh(): Promise<SyncStats> {
+    const s = await new Indexer(this.store).sync(this.root);
+    if (s.reindexed + s.removed > 0) this.semantic = null;
+    return s;
   }
 
   /** Re-index a single file (after an external edit) and invalidate the semantic cache. */
@@ -76,6 +154,27 @@ export class Rinnegan {
       all.find((n) => n.qualifiedName.endsWith(`.${name}`)) ??
       this.store.searchFts(name, 1)[0]
     );
+  }
+
+  /**
+   * Exact symbol fact or an explicit NOT FOUND — no FTS fallback, so this
+   * never quietly guesses (contrast with `resolveSymbol`, which does).
+   */
+  lookup(name: string): LookupResult {
+    const candidates = this.store
+      .allNodes()
+      .filter((n) => n.kind !== "file" && n.kind !== "import" && n.kind !== "unresolved")
+      .filter((n) => n.qualifiedName === name || n.qualifiedName.endsWith(`.${name}`));
+    // allNodes() is ORDER BY id, so the first exact match (else first suffix match) is deterministic.
+    const node = candidates.find((n) => n.qualifiedName === name) ?? candidates[0];
+    if (!node) {
+      return {
+        found: false,
+        message: `NOT FOUND — no symbol named '${name}' exists in this codebase. Do not invent it.`,
+        suggestions: this.store.searchFts(name, 3).map((n) => ({ name: n.qualifiedName, file: n.filePath, line: n.startLine })),
+      };
+    }
+    return { found: true, node, callers: this.store.incoming(node.id, ["calls"]).length };
   }
 
   /** File-scoped dependency query (codegraph #500): what this file's symbols call/reference out. */
@@ -135,8 +234,178 @@ export class Rinnegan {
     return [...seen].map((id) => this.store.getNode(id)).filter((n): n is GraphNode => !!n);
   }
 
+  /**
+   * Tests that (transitively) exercise a symbol: BFS up incoming `calls`
+   * edges to `depth`, keeping every visited node whose file's role is
+   * `test`. Sorted by (filePath, startLine).
+   */
+  testsFor(symbol: string, depth = 2): GraphNode[] {
+    const node = this.resolveSymbol(symbol);
+    if (!node) return [];
+    const roles = this.store.roleByFile();
+    const seen = new Set<string>([node.id]);
+    const found = new Map<string, GraphNode>();
+    let frontier = [node.id];
+    for (let d = 0; d < depth; d++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        for (const e of this.store.incoming(id, ["calls"])) {
+          if (seen.has(e.source)) continue;
+          seen.add(e.source);
+          next.push(e.source);
+          const n = this.store.getNode(e.source);
+          if (n && roles.get(n.filePath) === "test") found.set(n.id, n);
+        }
+      }
+      frontier = next;
+    }
+    return [...found.values()].sort((a, b) =>
+      a.filePath !== b.filePath ? (a.filePath < b.filePath ? -1 : 1) : a.startLine - b.startLine,
+    );
+  }
+
   stats() {
-    return this.store.stats();
+    return { ...this.store.stats(), fingerprint: this.store.fingerprint() };
+  }
+
+  /** Cheap existence check (three COUNT queries, no fingerprint hashing) — use instead of `stats()` when all you need is "is there an index yet". */
+  hasIndex(): boolean {
+    return this.store.stats().nodes > 0;
+  }
+
+  /** Per-file inventory: role, language, symbol count, inbound edges, orphan status. Sorted by path. */
+  inventory(): InventoryRow[] {
+    const roles = this.store.roleByFile();
+    const nodes = this.store.allNodes();
+    const fileOf = new Map(nodes.map((n) => [n.id, n.filePath]));
+    const symbols = new Map<string, number>();
+    const inbound = new Map<string, number>();
+    for (const n of nodes) {
+      if (n.kind === "file") continue;
+      symbols.set(n.filePath, (symbols.get(n.filePath) ?? 0) + 1);
+    }
+    for (const e of this.store.allEdges()) {
+      const sf = fileOf.get(e.source), tf = fileOf.get(e.target);
+      if (sf && tf && sf !== tf) inbound.set(tf, (inbound.get(tf) ?? 0) + 1);
+    }
+    return [...roles.entries()].map(([path, role]) => {
+      const inb = inbound.get(path) ?? 0;
+      return {
+        path, role,
+        language: languageOf(path) ?? "unknown",
+        symbols: symbols.get(path) ?? 0,
+        inboundEdges: inb,
+        orphaned: inb === 0 && role !== "entrypoint",
+      };
+    });
+  }
+
+  /**
+   * Doc mentions (see `docs.ts`'s `docs-inline` edges) that don't resolve to any
+   * real symbol — likely stale references to renamed/deleted code. Sorted by
+   * (docPath, line, name).
+   */
+  staleDocs(): StaleDoc[] {
+    const real = this.store.allNodes().filter((n) => n.kind !== "file" && n.kind !== "import" && n.kind !== "unresolved");
+    const isReal = (name: string) => real.some((n) => n.qualifiedName === name || n.qualifiedName.endsWith(`.${name}`));
+    const out: StaleDoc[] = [];
+    for (const e of this.store.allEdges()) {
+      if (e.resolver !== "docs-inline") continue;
+      const target = this.store.getNode(e.target);
+      const doc = this.store.getNode(e.source);
+      if (!target || !doc) continue;
+      const name = target.qualifiedName.replace(/^<docref>\./, "");
+      if (isReal(name)) continue;
+      out.push({ docPath: doc.filePath, line: e.line, name });
+    }
+    return out.sort((a, b) =>
+      a.docPath !== b.docPath ? (a.docPath < b.docPath ? -1 : 1) : a.line !== b.line ? a.line - b.line : a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    );
+  }
+
+  /**
+   * Architecture map: domains + inter-domain edges from `computeDomains`, each
+   * domain enriched with its top 5 non-file nodes by incoming-`calls` count
+   * (ties broken by lowest node id, for determinism).
+   */
+  map(): MapResult {
+    const { domains, edges } = computeDomains(this.store);
+    const nodesByFile = new Map<string, GraphNode[]>();
+    for (const n of this.store.allNodes()) {
+      if (n.kind === "file") continue;
+      const arr = nodesByFile.get(n.filePath);
+      if (arr) arr.push(n);
+      else nodesByFile.set(n.filePath, [n]);
+    }
+    const withTopSymbols = domains.map((d) => {
+      const ranked = d.files
+        .flatMap((f) => nodesByFile.get(f) ?? [])
+        .map((n) => ({ n, calls: this.store.incoming(n.id, ["calls"]).length }))
+        .sort((a, b) => (b.calls !== a.calls ? b.calls - a.calls : a.n.id < b.n.id ? -1 : 1));
+      const topSymbols = ranked.slice(0, 5).map(({ n }) => ({ name: n.qualifiedName, file: n.filePath, line: n.startLine }));
+      return { ...d, topSymbols };
+    });
+    return { domains: withTopSymbols, edges };
+  }
+
+  /** `.rinnegan-allow` entries merged with the caller-supplied allowlist (shared by `verify` and `verifyInputs`). */
+  private mergeAllow(extra?: string[]): Set<string> {
+    const allow = new Set(extra ?? []);
+    const allowFile = join(this.root, ".rinnegan-allow");
+    if (existsSync(allowFile)) {
+      for (const line of readFileSync(allowFile, "utf8").split("\n")) {
+        const t = line.trim();
+        if (t && !t.startsWith("#")) allow.add(t);
+      }
+    }
+    return allow;
+  }
+
+  /**
+   * Graph-native fact-check of a diff: unknown symbols, ground-truth signature
+   * echoes, and blast radius of edited definitions. Never mutates the on-disk
+   * index — the overlay it builds lives inside a transaction that always
+   * rolls back (see verify.ts).
+   */
+  async verify(diffText: string, opts: { allow?: string[] } = {}): Promise<VerifyReport> {
+    const files = parseUnifiedDiff(diffText);
+    const inputs: VerifyInput[] = [];
+    const parseFailures: Finding[] = [];
+    for (const f of files) {
+      if (f.deleted) {
+        inputs.push({ path: f.path, postImage: null, addedRanges: f.addedRanges });
+        continue;
+      }
+      try {
+        const original = f.created ? "" : readFileSync(join(this.root, f.path), "utf8");
+        inputs.push({ path: f.path, postImage: applyDiff(original, f.hunks), addedRanges: f.addedRanges });
+      } catch (err) {
+        parseFailures.push({
+          severity: "error",
+          rule: "parse-failure",
+          file: f.path,
+          line: 1,
+          message: `failed to read/apply diff for ${f.path}: ${(err as Error).message}`,
+        });
+      }
+    }
+
+    const report = await verifyChanges(this.store, this.root, inputs, { allow: this.mergeAllow(opts.allow) });
+    if (parseFailures.length) {
+      report.findings.push(...parseFailures);
+      report.findings = sortFindings(report.findings);
+    }
+    return report;
+  }
+
+  /**
+   * Fact-check pre-built `VerifyInput[]`s directly, skipping the diff
+   * parser/applier — for callers (like `--staged`) that already have each
+   * file's post-image from another source (e.g. the git index via `git
+   * show`).
+   */
+  async verifyInputs(inputs: VerifyInput[], opts: { allow?: string[] } = {}): Promise<VerifyReport> {
+    return verifyChanges(this.store, this.root, inputs, { allow: this.mergeAllow(opts.allow) });
   }
 
   close(): void {

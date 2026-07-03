@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { createHash } from "node:crypto";
 import { GraphStore } from "./store.js";
 
 describe("GraphStore", () => {
@@ -22,11 +23,42 @@ describe("GraphStore", () => {
     g.insertNode({ id: "x", kind: "function", qualifiedName: "f", filePath: "x.ts", language: "ts", startLine: 1, endLine: 2 });
     g.insertNode({ id: "y", kind: "function", qualifiedName: "g", filePath: "y.ts", language: "ts", startLine: 1, endLine: 2 });
     g.insertEdge({ source: "y", target: "x", kind: "calls", line: 1, col: 1, provenance: "ast_exact", confidence: 1, resolver: "ts" });
-    g.setFileMeta("x.ts", { hash: "h", mtimeMs: 1, nodeIds: ["x"] });
+    g.setFileMeta("x.ts", { hash: "h", mtimeMs: 1, nodeIds: ["x"], role: "library" });
 
     g.removeFile("x.ts");
     expect(g.getNode("x")).toBeUndefined();
     expect(g.incoming("x")).toHaveLength(0);
     expect(g.outgoing("y").filter((e) => e.target === "x")).toHaveLength(0);
+    g.close();
+  });
+
+  it("persists file role and lists roles", () => {
+    const s = GraphStore.open(":memory:");
+    s.setFileMeta("a.ts", { hash: "h", mtimeMs: 1, nodeIds: [], role: "test" });
+    expect(s.getFileMeta("a.ts")!.role).toBe("test");
+    expect(s.roleByFile().get("a.ts")).toBe("test");
+    s.close();
+  });
+
+  it("fingerprint pins the sha256(path + NUL + hash + NL, sorted by path) algorithm and is insertion-order independent", () => {
+    const expected = createHash("sha256").update("a.ts\0h1\n").update("b.ts\0h2\n").digest("hex");
+
+    const forward = GraphStore.open(":memory:");
+    forward.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
+    forward.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
+    expect(forward.fingerprint()).toBe(expected);
+    forward.close();
+
+    const reverse = GraphStore.open(":memory:");
+    reverse.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
+    reverse.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
+    expect(reverse.fingerprint()).toBe(expected);
+    reverse.close();
+  });
+
+  it("fingerprint of an empty index is sha256 of empty input", () => {
+    const s = GraphStore.open(":memory:");
+    expect(s.fingerprint()).toBe(createHash("sha256").update("").digest("hex"));
+    s.close();
   });
 });

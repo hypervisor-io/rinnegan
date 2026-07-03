@@ -25,7 +25,8 @@ change — while marking exactly which facts are ground truth.
   at the context edges) so a fraction of a 1M window is more than enough.
 
 Surfaces: **library** (`Rinnegan`), **CLI** (`rinnegan understand <task>`), **MCP server**
-(single `understand` tool).
+(default tools: `understand`, `lookup`, `verify`, `map`; `RINNEGAN_MCP_TOOLS=all` adds
+`search`, `deps`, `refs`, `callers`, `impact`).
 
 See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the build plan.
 
@@ -36,11 +37,58 @@ npm install        # better-sqlite3 ships a prebuilt binary (Node 20+)
 npm run build
 node bin/rinnegan.js index            # build the SQLite knowledge graph
 node bin/rinnegan.js understand "how does X work"   # minimal provenance-tagged slice
-node bin/rinnegan.js mcp              # MCP server (single 'understand' tool)
+node bin/rinnegan.js mcp              # MCP server (understand, lookup, verify, map)
 ```
 
-Other commands: `search`, `deps <file>`, `refs <symbol> [--write|--read]`,
-`callers <symbol>`, `impact <symbol>`, `status`. Add `--json` for machine output.
+Other commands: `inventory`, `verify [--staged|--diff <file|->] [--allow <names...>]`,
+`search`, `deps <file>`, `refs <symbol> [--write|--read]`, `callers <symbol>`,
+`tests <symbol>`, `lookup <name>`, `impact <symbol>`, `docs --stale`, `map [--mermaid]`,
+`status`, `watch`. `understand` also takes `-s, --scope <domain>` to restrict the slice
+to one architectural domain (see `rinnegan map`). Add `--json` to any command for
+machine output.
+
+**Agent loop.** `understand` the task → `lookup` anything about to be called → write
+the patch → `verify` it → apply.
+
+## Sharing the index (CI cache)
+
+The index is one file: `.rinnegan/graph.db`. Cache it in CI so warm runs update instead
+of reindexing cold.
+
+```yaml
+- run: npm ci && npm run build
+- uses: actions/cache@v4
+  with:
+    path: .rinnegan
+    key: rinnegan-${{ runner.os }}-${{ github.sha }}
+    restore-keys: rinnegan-${{ runner.os }}-
+- run: node bin/rinnegan.js index
+```
+
+`bin/rinnegan.js` runs the built `dist/cli/main.js`, so install + build must happen
+before `index` regardless of cache state; the cache only covers `.rinnegan`, so its
+position relative to `npm ci`/`npm run build` doesn't change correctness — it's placed
+after here to follow the standard deps-then-build-then-restore-artifacts order.
+
+`index`'s two-gate change detection (mtime, then hash) means a restored cache only
+reparses what changed since it was written — not the whole repo. Confirm two machines
+(or a cache restore vs. the working tree) hold the same corpus:
+
+```bash
+node bin/rinnegan.js status --json | jq .fingerprint
+```
+
+No S3 or git-backed store for the index — it's a single SQLite file, so `actions/cache`
+(or a plain `cp`) is the whole sharing story.
+
+## Pre-commit gate
+
+```bash
+echo 'rinnegan verify --staged || exit 1' >> .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+Unknown-symbol and parse-failure errors block the commit; signature echoes and
+blast-radius warnings inform but never fail it.
 
 ## Purpose
 
@@ -83,16 +131,20 @@ web-tree-sitter runtime supports 13–14 — no compatible build sourced); YAML/
 fails to load under the runtime); CSS/HTML/JSON/TOML (load fine, but no clean def/call model
 beyond what the manifest/MCP extractors already cover).
 
-## Status — Phase 1–7 (v0.1), 80 tests
-
-## Status — earlier note, Phase 1–5
+## Status
 
 Working end-to-end: SQLite provenance graph · scope-aware TS/JS extraction
 (read/write tags, honest unresolved boundaries) · **cross-file import resolution** ·
 **Python + Go extractors** (tree-sitter WASM) · deterministic sparse LSA+BM25 semantic
 search · signal engine (minimal spine → provenance rank → budget → position-order →
 whitespace-minimized verifiable render) · **incremental file watcher** · library + CLI +
-MCP server. Tests include byte-determinism and slice-quality gates.
+MCP server. 153 tests, including byte-determinism and slice-quality gates.
+
+**v0.2 surface:** a freshness guard (mtime/hash change detection, exposed as a
+fingerprint) keeps reads honest about a stale index, file roles back `inventory`, the
+new `verify` engine backs the pre-commit gate alongside `lookup`, `map`/domains scope
+`understand`, docs get a staleness check (`docs --stale`), and tests are linked back to
+the symbols they cover.
 
 **Measured on real codebases:**
 - Its own source: task slice **~85% smaller** than dumping the repo, all `[ast_exact]`,

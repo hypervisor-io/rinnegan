@@ -1,7 +1,8 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Rinnegan } from "../index.js";
+import { Rinnegan, freshnessStamp, renderLookup, renderVerify } from "../index.js";
+import { renderMapMarkdown } from "../domains/render.js";
 import { VERSION } from "../version.js";
 import { SERVER_INSTRUCTIONS } from "./instructions.js";
 
@@ -9,7 +10,7 @@ export interface ToolDef {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => string;
+  handler: (args: Record<string, unknown>, stamp: string) => string | Promise<string>;
 }
 
 const str = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
@@ -26,10 +27,18 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
       properties: {
         task: { type: "string", description: "What you are about to do, in a sentence." },
         budget: { type: "number", description: "Token budget for the slice (default 6000)." },
+        scope: { type: "string", description: "Restrict the slice to one domain name from the `map` tool." },
       },
       required: ["task"],
     },
-    handler: (a) => vx.understand(str(a.task), { tokenBudget: typeof a.budget === "number" ? a.budget : undefined }).text,
+    handler: (a, stamp) =>
+      [
+        stamp,
+        vx.understand(str(a.task), {
+          tokenBudget: typeof a.budget === "number" ? a.budget : undefined,
+          scope: str(a.scope) || undefined,
+        }).text,
+      ].join("\n"),
   };
 
   const search: ToolDef = {
@@ -71,9 +80,35 @@ export function buildTools(vx: Rinnegan): { listed: ToolDef[]; all: ToolDef[] } 
     handler: (a) => vx.impact(str(a.symbol)).map((n) => `${n.filePath}:${n.startLine}  ${n.qualifiedName}`).join("\n") || "(none)",
   };
 
-  const all = [understand, search, deps, refs, callers, impact];
+  const lookup: ToolDef = {
+    name: "lookup",
+    description:
+      "Exact symbol lookup. Returns the ground-truth signature and location, or an explicit NOT FOUND. " +
+      "Call before referencing any symbol you have not seen in a slice.",
+    inputSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+    handler: (a) => renderLookup(vx.lookup(str(a.name))),
+  };
+  const verify: ToolDef = {
+    name: "verify",
+    description:
+      "Fact-check a unified diff against the code graph BEFORE applying it: unknown symbols (hallucinations), " +
+      "real signatures of called functions, blast radius of edited definitions.",
+    inputSchema: { type: "object", properties: { diff: { type: "string" } }, required: ["diff"] },
+    handler: async (a) => renderVerify(await vx.verify(str(a.diff))),
+  };
+
+  const map: ToolDef = {
+    name: "map",
+    description:
+      "Architecture map: domains, entrypoints, top symbols, inter-domain dependencies. " +
+      "Call before understand --scope on large repos.",
+    inputSchema: { type: "object", properties: {} },
+    handler: () => renderMapMarkdown(vx.map()),
+  };
+
+  const all = [understand, search, deps, refs, callers, impact, lookup, verify, map];
   const exposeAll = process.env.RINNEGAN_MCP_TOOLS === "all";
-  return { listed: exposeAll ? all : [understand], all };
+  return { listed: exposeAll ? all : [understand, lookup, verify, map], all };
 }
 
 /** Create the MCP server (low-level Server → spec-correct stdio framing via the SDK). */
@@ -90,14 +125,31 @@ export function createServer(vx: Rinnegan): Server {
     tools: listed.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   }));
 
+  // The SDK dispatches CallToolRequests concurrently — it doesn't wait for one
+  // handler to finish before starting the next. `vx.refresh()` below is a write
+  // path (it mutates the on-disk index), so two pipelined tool calls could
+  // otherwise interleave their sync() runs and race on getFileMeta/removeFile/
+  // setFileMeta across await boundaries. Chain every call through `queue` so
+  // requests run one at a time, in arrival order.
+  let queue: Promise<unknown> = Promise.resolve();
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = byName.get(req.params.name);
-    if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
-    try {
-      return { content: [{ type: "text", text: tool.handler((req.params.arguments ?? {}) as Record<string, unknown>) }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
-    }
+    const run = async () => {
+      const tool = byName.get(req.params.name);
+      if (!tool) return { content: [{ type: "text", text: `Unknown tool: ${req.params.name}` }], isError: true };
+      const stamp = freshnessStamp(await vx.refresh());
+      try {
+        const text = await tool.handler((req.params.arguments ?? {}) as Record<string, unknown>, stamp);
+        return { content: [{ type: "text", text }] };
+      } catch (e) {
+        return { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true };
+      }
+    };
+    const result = queue.then(run, run);
+    queue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   });
 
   return server;
@@ -106,7 +158,7 @@ export function createServer(vx: Rinnegan): Server {
 /** Start the MCP server over stdio for a project root. projectPath is optional by design. */
 export async function runMcp(root: string = process.cwd()): Promise<void> {
   const vx = Rinnegan.open(root);
-  if (vx.stats().nodes === 0) await vx.indexAll();
+  if (!vx.hasIndex()) await vx.indexAll();
   const server = createServer(vx);
   await server.connect(new StdioServerTransport());
 }

@@ -42,7 +42,7 @@ function isMinified(name: string): boolean {
   return /\.(min|bundle)\.(js|css|mjs|cjs)$/.test(name) || /\.min\./.test(name);
 }
 
-const DOC_EXT = new Set([".md", ".mdx", ".markdown", ".rst", ".txt"]);
+export const DOC_EXT = new Set([".md", ".mdx", ".markdown", ".rst", ".txt"]);
 const MANIFEST_FILES = new Set(["package.json", "go.mod", "pyproject.toml", "pom.xml", "cargo.toml", "apm.yml"]);
 
 /** Special files matched by name (manifests, MCP configs) plus docs and code by extension. */

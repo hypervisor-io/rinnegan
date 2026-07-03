@@ -6,6 +6,7 @@ HOW TO USE
   It returns the few symbols that matter, with verbatim line-numbered source.
 - The output is Read-equivalent: cite file:line and edit directly. Do NOT re-grep
   or re-read files it already shows you.
+- Recommended loop: understand → lookup anything you are about to call → write patch → verify the patch → apply.
 
 TRUST CONTRACT (this is how you avoid hallucinating)
 - Each fact is tagged: [ast_exact] = ground truth, verified from the AST.

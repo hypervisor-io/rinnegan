@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "../graph/store.js";
+import type { GraphNode } from "../core/types.js";
 import { SemanticEngine } from "../semantic/engine.js";
 import { extractSpine } from "./spine.js";
 import { rankNodes } from "./rank.js";
@@ -18,6 +19,8 @@ export interface UnderstandOpts {
   /** "harmonic" (default): MAP→SIGNATURES→DETAIL tiers. "flat": detail only. */
   resolution?: "harmonic" | "flat";
   balance?: Balance;
+  /** Restrict the slice to nodes whose filePath is in this set (see `--scope`). */
+  scopeFiles?: Set<string>;
 }
 
 export interface UnderstandResult {
@@ -49,9 +52,20 @@ export function understand(
   let anchors = semantic.seed(task, seedLimit).map((s) => s.id);
   if (anchors.length === 0) anchors = store.searchFts(task, seedLimit).map((n) => n.id);
 
-  const spine = extractSpine(store, anchors, { depth, maxNodes });
+  const scopeFiles = opts.scopeFiles;
+  const inScope = scopeFiles ? (n: GraphNode) => scopeFiles.has(n.filePath) : undefined;
+  if (inScope) {
+    anchors = anchors.filter((id) => {
+      const n = store.getNode(id);
+      return !!n && inScope(n);
+    });
+  }
+
+  const spine = extractSpine(store, anchors, { depth, maxNodes, include: inScope });
   const relevance = semantic.relevance(task);
-  const ranked = rankNodes(store, spine, relevance);
+  const testIntent = /\b(test|spec|coverage)s?\b/i.test(task);
+  const roles = store.roleByFile();
+  const ranked = rankNodes(store, spine, relevance, { roles, testIntent });
 
   const fileCache = new Map<string, string | undefined>();
   const readSource = (path: string): string | undefined => {
@@ -70,7 +84,7 @@ export function understand(
   if ((opts.resolution ?? "harmonic") === "harmonic") {
     const header = [`# Rinnegan slice for: ${task}`, LEGEND, ""].join("\n");
     const inner = Math.max(200, tokenBudget - estimateTokens(header) - 30); // reserve fixed overhead
-    const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance });
+    const h = buildHarmonic(store, ranked, readSource, { tokenBudget: inner, balance: opts.balance, roles });
     const text = [header, h.text].join("\n");
     return { text, facts: h.facts, tokensEstimate: estimateTokens(text), anchors };
   }

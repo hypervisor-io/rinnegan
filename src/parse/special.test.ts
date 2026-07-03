@@ -11,6 +11,17 @@ describe("docs extractor", () => {
     expect(link!.metadata?.target).toMatch(/guide\.md$/);
     expect(r.edges.some((e) => e.resolver === "docs-wiki")).toBe(true);
   });
+
+  it("inline-code mentions become docs-inline edges, skipping fenced code and bare filenames", async () => {
+    const src = ["See `realFn` for details.", "```", "`fenced`", "```", "Also see `a/b.ts`."].join("\n");
+    const r = await parseFile("docs/x.md", src, "markdown");
+    const inline = r.edges.filter((e) => e.resolver === "docs-inline");
+    expect(inline.length).toBe(1);
+    expect(inline[0]).toMatchObject({ provenance: "heuristic", confidence: 0.4, line: 1 });
+    const target = r.nodes.find((n) => n.id === inline[0].target);
+    expect(target?.qualifiedName).toBe("<docref>.realFn");
+    expect(target?.kind).toBe("unresolved");
+  });
 });
 
 describe("manifest extractor", () => {

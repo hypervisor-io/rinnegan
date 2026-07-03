@@ -1,6 +1,6 @@
 import { GraphStore } from "../graph/store.js";
 import type { Ranked } from "./rank.js";
-import type { NodeKind } from "../core/types.js";
+import type { GraphNode, NodeKind } from "../core/types.js";
 import { estimateTokens, positionOrder } from "./budget.js";
 import { renderFact, type RenderedFact } from "./render.js";
 
@@ -8,6 +8,21 @@ import { renderFact, type RenderedFact } from "./render.js";
 const DEF_KINDS = new Set<NodeKind>([
   "function", "method", "class", "interface", "struct", "type_alias", "enum", "module",
 ]);
+
+/**
+ * Cheap, depth-1 coverage signal for a DETAIL fact: direct callers whose file
+ * role is `test`, up to 3 file paths. (The transitive view — through
+ * intermediate helpers — is what the `tests` command owns.)
+ */
+function coveredBy(store: GraphStore, node: GraphNode, roles: Map<string, string>): string {
+  const testFiles = new Set<string>();
+  for (const e of store.incoming(node.id, ["calls"])) {
+    const src = store.getNode(e.source);
+    if (src && roles.get(src.filePath) === "test") testFiles.add(src.filePath);
+  }
+  const paths = [...testFiles].sort().slice(0, 3);
+  return paths.length > 0 ? paths.join(", ") : "(none)";
+}
 
 export interface Balance {
   map: number;
@@ -37,7 +52,7 @@ export function buildHarmonic(
   store: GraphStore,
   ranked: Ranked[],
   readSource: (path: string) => string | undefined,
-  opts: { tokenBudget: number; balance?: Balance },
+  opts: { tokenBudget: number; balance?: Balance; roles?: Map<string, string> },
 ): HarmonicResult {
   const balance = opts.balance ?? DEFAULT_BALANCE;
   const mapBudget = opts.tokenBudget * balance.map;
@@ -82,6 +97,9 @@ export function buildHarmonic(
   let detailUsed = 0;
   for (const r of meaningful) {
     const fact = renderFact(store, r, readSource(r.node.filePath), { skeleton: false });
+    if (opts.roles && DEF_KINDS.has(r.node.kind)) {
+      fact.body += `\n  covered-by: ${coveredBy(store, r.node, opts.roles)}`;
+    }
     const c = estimateTokens(fact.body);
     if (detailUsed + c > detailBudget && facts.length > 0) break;
     facts.push(fact);
