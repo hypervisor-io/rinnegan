@@ -63,32 +63,33 @@ export function buildClassifyContext(root: string, manifestPaths: string[]): Cla
   const manifestDirs = new Set<string>();
 
   for (const manifestPath of manifestPaths) {
-    const dir = dirname(manifestPath);
-    manifestDirs.add(dir === "." ? "" : dir.replace(/\\/g, "/"));
+    const p = manifestPath.replace(/\\/g, "/");
+    const dir = dirname(p);
+    manifestDirs.add(dir === "." ? "" : dir);
 
-    if (basenameLower(manifestPath) !== "package.json") continue;
+    if (basenameLower(p) !== "package.json") continue;
     let json: unknown;
     try {
-      json = JSON.parse(readFileSync(join(root, manifestPath), "utf8"));
+      json = JSON.parse(readFileSync(join(root, p), "utf8"));
     } catch {
       continue;
     }
     if (!json || typeof json !== "object") continue;
     const j = json as Record<string, unknown>;
 
-    if (typeof j.main === "string") entryTargets.add(normalizeTarget(manifestPath, j.main));
+    if (typeof j.main === "string") entryTargets.add(normalizeTarget(p, j.main));
 
-    if (typeof j.bin === "string") entryTargets.add(normalizeTarget(manifestPath, j.bin));
+    if (typeof j.bin === "string") entryTargets.add(normalizeTarget(p, j.bin));
     else if (j.bin && typeof j.bin === "object") {
       for (const v of Object.values(j.bin as Record<string, unknown>)) {
-        if (typeof v === "string") entryTargets.add(normalizeTarget(manifestPath, v));
+        if (typeof v === "string") entryTargets.add(normalizeTarget(p, v));
       }
     }
 
     if (j.exports !== undefined) {
       const leaves: string[] = [];
       collectExportLeaves(j.exports, leaves);
-      for (const v of leaves) entryTargets.add(normalizeTarget(manifestPath, v));
+      for (const v of leaves) entryTargets.add(normalizeTarget(p, v));
     }
   }
 

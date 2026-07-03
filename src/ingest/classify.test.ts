@@ -1,14 +1,18 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { classifyFile, buildClassifyContext } from "./classify.js";
 
 const fixtureDirs: string[] = [];
 /** Fresh temp dir seeded with the given relative-path → content files. */
 function fixture(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), "rinnegan-classify-"));
-  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+  for (const [name, content] of Object.entries(files)) {
+    const full = join(dir, name);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content);
+  }
   fixtureDirs.push(dir);
   return dir;
 }
@@ -44,5 +48,12 @@ describe("classifyFile", () => {
     expect(ctx2.entryTargets.has("dist/index.js")).toBe(true);
     expect(ctx2.entryTargets.has("bin/x.js")).toBe(true);
     expect(ctx2.manifestDirs.has("")).toBe(true);
+  });
+  it("buildClassifyContext normalizes windows-style manifest path separators", () => {
+    const root = fixture({ "packages/foo/package.json": JSON.stringify({ main: "./lib/index.js" }) });
+    const ctx2 = buildClassifyContext(root, ["packages\\foo\\package.json"]);
+    expect(ctx2.entryTargets.has("packages/foo/lib/index.js")).toBe(true);
+    expect(ctx2.manifestDirs.has("packages/foo")).toBe(true);
+    expect(ctx2.manifestDirs.has("")).toBe(false);
   });
 });
