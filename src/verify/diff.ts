@@ -1,8 +1,7 @@
 // Unified-diff parsing + in-memory application. Pure string processing, no I/O.
-// ponytail: only the standard `diff --git` (git-generated) format is parsed —
-// that's what `rinnegan verify` will feed it (git diff / git show output).
-// Raw `diff -u` output without a `diff --git` header is out of scope; add a
-// `--- ` boundary fallback if that ever becomes a real input source.
+// Parses both `diff --git` (git-generated) and plain `--- `/`+++ ` unified
+// diffs (e.g. agent-authored patches feeding the MCP verify tool with no git
+// envelope at all) — see splitIntoFileBlocks.
 
 export interface DiffHunk {
   oldStart: number;
@@ -26,12 +25,31 @@ function stripPrefix(path: string): string {
   return path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path;
 }
 
-/** Splits raw diff text into one block of lines per `diff --git` file section. */
+/**
+ * Splits raw diff text into one block of lines per file section. Recognizes
+ * two header styles:
+ *  - `diff --git a/x b/y` (git-generated diffs)
+ *  - plain `--- a/x` / `+++ b/y` (no git envelope — e.g. hand-authored or
+ *    patch(1)-style unified diffs)
+ * Once a `diff --git` line has been seen, later `--- ` lines are assumed to
+ * be that header style's own file markers and are never treated as a new
+ * boundary — a `--- ` line only opens a block when no `diff --git` header
+ * has appeared yet AND the very next line starts with `+++ ` (a hunk
+ * deletion line can itself start with `--- ` — e.g. deleting a SQL/Lua
+ * comment "-- foo" renders as "--- foo" — so the `+++ ` lookahead is what
+ * disambiguates a real header from hunk content).
+ */
 function splitIntoFileBlocks(text: string): string[][] {
   const lines = text.split("\n");
   const starts: number[] = [];
+  let sawGitHeader = false;
   lines.forEach((l, i) => {
-    if (l.startsWith("diff --git ")) starts.push(i);
+    if (l.startsWith("diff --git ")) {
+      sawGitHeader = true;
+      starts.push(i);
+    } else if (!sawGitHeader && l.startsWith("--- ") && lines[i + 1]?.startsWith("+++ ")) {
+      starts.push(i);
+    }
   });
   const blocks: string[][] = [];
   for (let i = 0; i < starts.length; i++) {
@@ -92,7 +110,9 @@ function computeAddedRanges(hunks: DiffHunk[]): [number, number][] {
     let counter = hunk.newStart;
     let rangeStart: number | null = null;
     for (const line of hunk.lines) {
-      if (line[0] === "+") {
+      const tag = line[0];
+      if (tag === "\\") continue; // "\ No newline at end of file" marker — not a content line, doesn't affect counts
+      if (tag === "+") {
         if (rangeStart === null) rangeStart = counter;
         counter++;
         continue;
@@ -101,7 +121,10 @@ function computeAddedRanges(hunks: DiffHunk[]): [number, number][] {
         ranges.push([rangeStart, counter - 1]);
         rangeStart = null;
       }
-      if (line[0] === " ") counter++; // '-' lines don't advance the post-image counter
+      // '-' lines don't advance the post-image counter. Context lines do:
+      // tag === " " normally, or tag === undefined for a blank context line
+      // whose leading space got stripped in transport (empty hunk line).
+      if (tag === " " || tag === undefined) counter++;
     }
     if (rangeStart !== null) ranges.push([rangeStart, counter - 1]);
   }
@@ -140,12 +163,16 @@ export function applyDiff(original: string, hunks: DiffHunk[]): string {
     }
     for (const line of hunk.lines) {
       const tag = line[0];
-      const content = line.slice(1);
-      if (tag === " " || tag === "-") {
+      if (tag === "\\") continue; // "\ No newline at end of file" marker — not a content line
+      // A blank context line whose leading space got stripped in transport
+      // arrives as an empty hunk line (tag undefined); treat it as context.
+      const isContext = tag === " " || tag === undefined;
+      const content = tag === undefined ? "" : line.slice(1);
+      if (isContext || tag === "-") {
         if (origLines[cursor] !== content) {
           throw new Error(`hunk mismatch at line ${cursor + 1}`);
         }
-        if (tag === " ") out.push(content);
+        if (isContext) out.push(content);
         cursor++;
       } else if (tag === "+") {
         out.push(content);

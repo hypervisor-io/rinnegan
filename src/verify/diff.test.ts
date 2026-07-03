@@ -95,9 +95,85 @@ describe("applyDiff", () => {
     expect(result).toBe(["newline1", "newline2", "newline3"].join("\n"));
   });
 
+  it("applies a deletion hunk to produce the exact post-image (finding 3)", () => {
+    const ORIGINAL_OLD = ["oldline1", "oldline2"].join("\n");
+    const files = parseUnifiedDiff(DIFF_TEXT);
+    const result = applyDiff(ORIGINAL_OLD, files[2].hunks);
+    expect(result).toBe("");
+  });
+
   it("throws a precise mismatch error when context/removal lines don't match original", () => {
     const files = parseUnifiedDiff(DIFF_TEXT);
     const corrupted = ORIGINAL_A.replace("line8", "lineBAD");
     expect(() => applyDiff(corrupted, files[0].hunks)).toThrow("hunk mismatch at line 8");
+  });
+
+  it("round-trips a blank context line (empty string in hunk, leading space stripped by transport)", () => {
+    const original = ["line1", "", "line3"].join("\n");
+    const hunks = [
+      {
+        oldStart: 1,
+        oldLines: 3,
+        newStart: 1,
+        newLines: 3,
+        lines: [" line1", "", "-line3", "+line3-changed"],
+      },
+    ];
+    const result = applyDiff(original, hunks);
+    expect(result).toBe(["line1", "", "line3-changed"].join("\n"));
+  });
+});
+
+describe("plain unified diff (no `diff --git` header)", () => {
+  // Same file section as a.txt above, but as a bare `--- `/`+++ ` unified
+  // diff — the format an agent-authored patch feeding the MCP verify tool
+  // will typically use, with no git envelope at all.
+  const PLAIN_DIFF_TEXT = [
+    "--- a/a.txt",
+    "+++ b/a.txt",
+    "@@ -1,4 +1,4 @@",
+    " line1",
+    "-line2",
+    "+line2-changed",
+    " line3",
+    " line4",
+    "@@ -7,4 +7,5 @@",
+    " line7",
+    " line8",
+    "-line9",
+    "+line9-changed",
+    "+line9b",
+    " line10",
+  ].join("\n");
+
+  it("parses to the same DiffFile as its git-header twin", () => {
+    const plain = parseUnifiedDiff(PLAIN_DIFF_TEXT);
+    const git = parseUnifiedDiff(DIFF_TEXT);
+    expect(plain).toHaveLength(1);
+    expect(plain[0].path).toBe(git[0].path);
+    expect(plain[0].addedRanges).toEqual(git[0].addedRanges);
+    expect(plain[0].hunks).toEqual(git[0].hunks);
+  });
+
+  it("does not mis-split on a hunk deletion line whose content starts with `--`", () => {
+    // Deleting a SQL/Lua-style comment line "-- guard" (content) renders as
+    // the raw hunk line "--- guard" (deletion "-" prefix + "-- guard") —
+    // indistinguishable from a `--- ` header UNLESS the parser also checks
+    // that the next line starts with `+++ `.
+    const text = [
+      "--- a/first.txt",
+      "+++ b/first.txt",
+      "@@ -1,2 +1,1 @@",
+      "--- guard",
+      " kept",
+      "--- a/second.txt",
+      "+++ b/second.txt",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    const files = parseUnifiedDiff(text);
+    expect(files.map((f) => f.path)).toEqual(["first.txt", "second.txt"]);
+    expect(files[0].hunks[0].lines).toEqual(["--- guard", " kept"]);
   });
 });
