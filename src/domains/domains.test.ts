@@ -45,8 +45,8 @@ const FILES = {
   ].join("\n"),
 };
 
-async function buildStore(): Promise<GraphStore> {
-  const root = fixture(FILES);
+async function buildStore(files: Record<string, string> = FILES): Promise<GraphStore> {
+  const root = fixture(files);
   const store = GraphStore.open(":memory:");
   await new Indexer(store).indexAll(root);
   return store;
@@ -78,6 +78,45 @@ describe("computeDomains", () => {
       const prev = edges[i - 1], cur = edges[i];
       expect(prev.from < cur.from || (prev.from === cur.from && prev.to <= cur.to)).toBe(true);
     }
+  });
+
+  // Regression for a domain-name collision: propagation can land two different final
+  // labels on domains that both fall back to the same commonDirPrefix name (here "src",
+  // since both {a,b} and {c,d} span two top-level dirs and share only "src"). Edge
+  // aggregation must key on the label pair, not the rendered name — otherwise a real
+  // cross-domain edge (b -> c below) gets treated as a same-domain edge and dropped.
+  it("keeps a cross-domain edge even when the two domains render to the same name", async () => {
+    const store = await buildStore({
+      "package.json": JSON.stringify({ main: "./src/d0/a.ts" }),
+      "src/d0/a.ts": [
+        `import { fn_b } from "../d1/b";`,
+        `export function fn_a1() { return fn_b(); }`,
+        `export function fn_a2() { return fn_b(); }`,
+      ].join("\n"),
+      "src/d1/b.ts": [
+        `import { fn_c1 } from "../d2/c";`,
+        `export function fn_b() { return fn_c1(); }`,
+      ].join("\n"),
+      "src/d2/c.ts": [
+        `import { fn_d } from "../d3/d";`,
+        `export function fn_c1() { return fn_d(); }`,
+        `export function fn_c2() { return fn_d(); }`,
+      ].join("\n"),
+      "src/d3/d.ts": [`export function fn_d() { return 1; }`].join("\n"),
+    });
+    const { domains, edges } = computeDomains(store);
+    store.close();
+
+    const srcDomains = domains.filter((d) => d.name === "src");
+    expect(srcDomains).toHaveLength(2); // two distinct labels, same rendered name: the collision
+    const groupA = srcDomains.find((d) => d.files.includes("src/d1/b.ts"))!;
+    const groupB = srcDomains.find((d) => d.files.includes("src/d2/c.ts"))!;
+    expect(groupA).not.toBe(groupB);
+
+    // The real b -> c cross-domain edge must survive despite from === to === "src".
+    const crossEdge = edges.find((e) => e.from === "src" && e.to === "src");
+    expect(crossEdge).toBeTruthy();
+    expect(crossEdge!.weight).toBe(1);
   });
 
   it("is deterministic: byte-identical across two computeDomains calls on a rebuilt store", async () => {

@@ -114,16 +114,23 @@ export function computeDomains(store: GraphStore): { domains: Domain[]; edges: D
   domains.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
   // Rule 5: edges = directed file-graph weights aggregated between distinct final domains, sorted by (from, to).
-  const domainEdges = new Map<string, Map<string, number>>();
+  // Aggregate on the raw LABEL pair, not the display name: two distinct labels can render to the
+  // same name (e.g. a singleton pulled out of a directory by propagation gets name = its own dir,
+  // colliding with the remaining group's prefix), so name-equality would drop a real cross-domain
+  // edge or merge two unrelated ones. Names are only for display, applied when flattening below.
+  const labelEdges = new Map<string, Map<string, number>>();
   for (const [a, row] of directed) {
-    const da = nameOfLabel.get(labels.get(a)!)!;
+    const la = labels.get(a)!;
     for (const [b, w] of row) {
-      const db = nameOfLabel.get(labels.get(b)!)!;
-      if (da !== db) bump(domainEdges, da, db, w);
+      const lb = labels.get(b)!;
+      if (la !== lb) bump(labelEdges, la, lb, w);
     }
   }
   const edges: DomainEdge[] = [];
-  for (const [from, row] of domainEdges) for (const [to, weight] of row) edges.push({ from, to, weight });
+  for (const [la, row] of labelEdges) {
+    const from = nameOfLabel.get(la)!;
+    for (const [lb, weight] of row) edges.push({ from, to: nameOfLabel.get(lb)!, weight });
+  }
   edges.sort((a, b) => (a.from !== b.from ? (a.from < b.from ? -1 : 1) : a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
 
   return { domains, edges };
