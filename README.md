@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/branding/rinnegan-hero.png" alt="Rinnegan — the all-seeing eye for your codebase" width="100%" />
+<img src="docs/branding/rinnegan-cool.png" alt="Rinnegan — the all-seeing eye for your codebase" width="100%" />
 
 # Rinnegan
 
