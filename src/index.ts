@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { GraphStore } from "./graph/store.js";
-import { Indexer, type IndexStats } from "./index/indexer.js";
+import { Indexer, type IndexStats, type SyncStats } from "./index/indexer.js";
 import { SemanticEngine } from "./semantic/engine.js";
 import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
@@ -9,10 +9,18 @@ import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 export { VERSION } from "./version.js";
 export type { GraphNode, GraphEdge, Provenance, ReadWrite, NodeKind, EdgeKind } from "./core/types.js";
 export type { IndexStats } from "./index/indexer.js";
+export { type SyncStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
 
 export interface RinneganOpts {
   dbPath?: string;
+}
+
+/** Human-readable freshness line prepended to slices by the CLI/MCP surfaces. */
+export function freshnessStamp(s: SyncStats): string {
+  return s.reindexed + s.removed === 0
+    ? "# index: fresh"
+    : `# index: ${s.reindexed} file(s) reindexed, ${s.removed} removed just now`;
 }
 
 /** The Rinnegan public API — the shared core behind the CLI and MCP server. */
@@ -43,6 +51,13 @@ export class Rinnegan {
 
   understand(task: string, opts: Partial<UnderstandOpts> = {}): UnderstandResult {
     return understand(this.store, this.sem(), task, { root: this.root, ...opts });
+  }
+
+  /** Reconcile index with the working tree. Answers must never be stale. */
+  async refresh(): Promise<SyncStats> {
+    const s = await new Indexer(this.store).sync(this.root);
+    if (s.reindexed + s.removed > 0) this.semantic = null;
+    return s;
   }
 
   /** Re-index a single file (after an external edit) and invalidate the semantic cache. */

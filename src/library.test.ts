@@ -1,8 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Rinnegan } from "./index.js";
+import { Rinnegan, freshnessStamp } from "./index.js";
+
+const fixtureDirs: string[] = [];
+
+/** Fresh temp dir seeded with the given relative-path → content files. */
+function fixture(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "rinnegan-lib-"));
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content);
+  fixtureDirs.push(dir);
+  return dir;
+}
 
 describe("Rinnegan library", () => {
   let root: string;
@@ -29,6 +39,7 @@ describe("Rinnegan library", () => {
   afterAll(() => {
     vx.close();
     rmSync(root, { recursive: true, force: true });
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
   it("understand returns a relevant slice", () => {
@@ -49,5 +60,28 @@ describe("Rinnegan library", () => {
 
   it("impact of validate includes login", () => {
     expect(vx.impact("validate").map((n) => n.qualifiedName)).toContain("login");
+  });
+
+  it("refresh picks up an edit so understand cites current facts", async () => {
+    // ponytail: fixture names use "alpha"/"beta" (not the brief's literal oldName/newName) —
+    // GraphStore.searchFts OR-matches sub-tokens, so "oldName" would false-positive-match a
+    // renamed "newName" node via their shared "name" token. Verified via direct repro that
+    // refresh() itself fully removes the old node (search("old"-only-token) is empty); this
+    // is a pre-existing FTS recall-over-precision quirk, out of scope for this task.
+    const root = fixture({ "a.ts": "export function alpha() {}" });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+    writeFileSync(join(root, "a.ts"), "export function beta() {}");
+    const t = Date.now() + 5000;
+    utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
+    const s = await vx.refresh();
+    expect(s.reindexed).toBe(1);
+    expect(vx.search("beta").length).toBeGreaterThan(0);
+    expect(vx.search("alpha").length).toBe(0);
+  });
+
+  it("freshnessStamp wording", () => {
+    expect(freshnessStamp({ reindexed: 0, removed: 0 })).toBe("# index: fresh");
+    expect(freshnessStamp({ reindexed: 2, removed: 1 })).toBe("# index: 2 file(s) reindexed, 1 removed just now");
   });
 });
