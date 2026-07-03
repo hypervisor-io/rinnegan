@@ -1,11 +1,49 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Command } from "commander";
-import { Rinnegan, freshnessStamp, type SyncStats } from "../index.js";
+import { Rinnegan, freshnessStamp, type SyncStats, type VerifyInput, type VerifyReport } from "../index.js";
+import { parseUnifiedDiff } from "../verify/diff.js";
 import { VERSION } from "../version.js";
 
 type Out = (s: string) => void;
 
 function openIndexed(root: string): Rinnegan {
   return Rinnegan.open(root);
+}
+
+/** Build VerifyInput[] straight from the git index: paths + addedRanges from
+ * `git diff --cached`, post-images from `git show :<path>` (fails for a
+ * staged deletion — that's the null postImage the report expects). */
+function stagedInputs(root: string): VerifyInput[] {
+  if (!existsSync(join(root, ".git"))) {
+    throw new Error("not a git repository — use --diff <patch>");
+  }
+  const diffText = execFileSync("git", ["-C", root, "diff", "--cached", "--unified=0"], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return parseUnifiedDiff(diffText).map((f) => {
+    let postImage: string | null = null;
+    try {
+      postImage = execFileSync("git", ["-C", root, "show", `:${f.path}`], {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ["ignore", "pipe", "ignore"], // a staged deletion makes this fail — expected, not worth a scary stderr line
+      });
+    } catch {
+      // staged deletion (or otherwise unreadable from the index) — null postImage
+    }
+    return { path: f.path, postImage, addedRanges: f.addedRanges };
+  });
+}
+
+/** One line per finding — `<file>:<line>  <severity>  <rule>  <message>` — plus a summary line. */
+function renderVerify(report: VerifyReport): string {
+  const lines = report.findings.map((f) => `${f.file}:${f.line}  ${f.severity}  ${f.rule}  ${f.message}`);
+  const count = (sev: string) => report.findings.filter((f) => f.severity === sev).length;
+  lines.push(`${count("error")} error(s), ${count("warn")} warning(s), ${count("info")} info`);
+  return lines.join("\n");
 }
 
 /** Reconcile the index with the working tree before answering. Never answer stale. */
@@ -76,6 +114,26 @@ export function buildProgram(out: Out, cwd: string): Command {
           ? JSON.stringify({ tokensEstimate: res.tokensEstimate, anchors: res.anchors, text: res.text, fresh })
           : [freshnessStamp(fresh), res.text].join("\n"),
       );
+      vx.close();
+    });
+
+  program
+    .command("verify")
+    .description("Graph-native fact-check of a diff: unknown symbols, signature echo, blast radius")
+    .option("--staged", "verify the git index (staged changes) instead of a diff")
+    .option("--diff <file>", "unified diff to verify ('-' reads stdin)")
+    .option("--allow <names...>", "symbol names to allow (suppress unknown-symbol findings)")
+    .action(async (opts: { staged?: boolean; diff?: string; allow?: string[] }) => {
+      if (!opts.staged && !opts.diff) throw new Error("verify requires --staged or --diff <file|->");
+      const root = dir();
+      const inputs = opts.staged ? stagedInputs(root) : undefined;
+      const diffText = inputs ? undefined : opts.diff === "-" ? readFileSync(0, "utf8") : readFileSync(opts.diff!, "utf8");
+
+      const vx = openIndexed(root);
+      await ensureIndexed(vx);
+      const report = inputs ? await vx.verifyInputs(inputs, { allow: opts.allow }) : await vx.verify(diffText!, { allow: opts.allow });
+      out(json() ? JSON.stringify(report) : renderVerify(report));
+      if (report.findings.some((f) => f.severity === "error")) process.exitCode = 1;
       vx.close();
     });
 

@@ -195,6 +195,19 @@ export class Rinnegan {
     });
   }
 
+  /** `.rinnegan-allow` entries merged with the caller-supplied allowlist (shared by `verify` and `verifyInputs`). */
+  private mergeAllow(extra?: string[]): Set<string> {
+    const allow = new Set(extra ?? []);
+    const allowFile = join(this.root, ".rinnegan-allow");
+    if (existsSync(allowFile)) {
+      for (const line of readFileSync(allowFile, "utf8").split("\n")) {
+        const t = line.trim();
+        if (t && !t.startsWith("#")) allow.add(t);
+      }
+    }
+    return allow;
+  }
+
   /**
    * Graph-native fact-check of a diff: unknown symbols, ground-truth signature
    * echoes, and blast radius of edited definitions. Never mutates the on-disk
@@ -224,21 +237,22 @@ export class Rinnegan {
       }
     }
 
-    const allow = new Set(opts.allow ?? []);
-    const allowFile = join(this.root, ".rinnegan-allow");
-    if (existsSync(allowFile)) {
-      for (const line of readFileSync(allowFile, "utf8").split("\n")) {
-        const t = line.trim();
-        if (t && !t.startsWith("#")) allow.add(t);
-      }
-    }
-
-    const report = await verifyChanges(this.store, this.root, inputs, { allow });
+    const report = await verifyChanges(this.store, this.root, inputs, { allow: this.mergeAllow(opts.allow) });
     if (parseFailures.length) {
       report.findings.push(...parseFailures);
       report.findings = sortFindings(report.findings);
     }
     return report;
+  }
+
+  /**
+   * Fact-check pre-built `VerifyInput[]`s directly, skipping the diff
+   * parser/applier — for callers (like `--staged`) that already have each
+   * file's post-image from another source (e.g. the git index via `git
+   * show`).
+   */
+  async verifyInputs(inputs: VerifyInput[], opts: { allow?: string[] } = {}): Promise<VerifyReport> {
+    return verifyChanges(this.store, this.root, inputs, { allow: this.mergeAllow(opts.allow) });
   }
 
   close(): void {

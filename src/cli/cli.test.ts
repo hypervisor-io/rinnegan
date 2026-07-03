@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCli } from "./main.js";
@@ -94,5 +95,67 @@ describe("CLI", () => {
     expect(text.split("\n")[0]).toMatch(/^# index: /);
     expect(text).toContain("beta");
     expect(text).not.toContain("alpha");
+  });
+
+  it("verify --diff flags a call to a nonexistent symbol and sets exit code 1", async () => {
+    const dir = fixture({ "svc.ts": "export function orbit(x){ return x }\n" });
+    await runCli(["index"], () => {}, dir);
+    writeFileSync(
+      join(dir, "bad.patch"),
+      ["--- a/svc.ts", "+++ b/svc.ts", "@@ -1,1 +1,2 @@", " export function orbit(x){ return x }", "+phantom();"].join("\n"),
+    );
+
+    const lines: string[] = [];
+    process.exitCode = 0;
+    await runCli(["verify", "--diff", join(dir, "bad.patch")], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toContain("unknown-symbol");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0; // reset — this test deliberately triggers the exit-1 path
+  });
+
+  it("verify --diff on a clean patch reports 0 errors and leaves exit code untouched", async () => {
+    const dir = fixture({ "lib.ts": "export function orbit(x){ return x }\n" });
+    await runCli(["index"], () => {}, dir);
+    writeFileSync(
+      join(dir, "clean.patch"),
+      ["--- a/lib.ts", "+++ b/lib.ts", "@@ -1,1 +1,2 @@", " export function orbit(x){ return x }", "+orbit(1);"].join("\n"),
+    );
+
+    const lines: string[] = [];
+    process.exitCode = 0;
+    await runCli(["verify", "--diff", join(dir, "clean.patch")], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toContain("0 error(s)");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("verify --staged outside a git repo errors and names --diff", async () => {
+    const dir = fixture({ "solo.ts": "export function orbit(x){ return x }\n" });
+    await expect(runCli(["verify", "--staged"], () => {}, dir)).rejects.toThrow(/--diff/);
+  });
+
+  it("verify --staged reads the git index directly (edited + deleted files)", async () => {
+    const dir = fixture({});
+    execFileSync("git", ["init", "-q"], { cwd: dir });
+    execFileSync("git", ["-C", dir, "config", "user.email", "test@rinnegan.dev"]);
+    execFileSync("git", ["-C", dir, "config", "user.name", "rinnegan-test"]);
+    writeFileSync(join(dir, "mod.ts"), "export function nimbus(x){ return x }\n");
+    writeFileSync(join(dir, "drop.ts"), "export function ember(){ return 1 }\n");
+    execFileSync("git", ["-C", dir, "add", "-A"]);
+    execFileSync("git", ["-C", dir, "commit", "-q", "-m", "init"]);
+
+    await runCli(["index"], () => {}, dir);
+
+    writeFileSync(join(dir, "mod.ts"), "export function nimbus(x){ return x }\nwisp();\n");
+    execFileSync("git", ["-C", dir, "add", "mod.ts"]);
+    execFileSync("git", ["-C", dir, "rm", "-q", "--cached", "drop.ts"]);
+
+    const lines: string[] = [];
+    process.exitCode = 0;
+    await runCli(["verify", "--staged"], (s) => lines.push(s), dir);
+    const text = lines.join("\n");
+    expect(text).toContain("unknown-symbol");
+    expect(text).toContain("wisp");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0; // reset — this test deliberately triggers the exit-1 path
   });
 });
