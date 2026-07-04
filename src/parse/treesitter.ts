@@ -199,7 +199,8 @@ export async function extractTreeSitter(
 
   const emitted = new Set<string>();
   function pushEdge(e: GraphEdge): void {
-    const key = `${e.source}|${e.target}|${e.kind}`;
+    // line in the key so each call site gets an edge, matching typescript.ts (F1).
+    const key = `${e.source}|${e.target}|${e.kind}|${e.line}`;
     if (emitted.has(key)) return;
     emitted.add(key);
     edges.push(e);

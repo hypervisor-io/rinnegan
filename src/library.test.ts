@@ -55,6 +55,25 @@ describe("Rinnegan library", () => {
     expect(callers).toContain("login");
   });
 
+  it("callers dedupes when the same caller calls the target twice (F1 corollary)", async () => {
+    const root2 = fixture({
+      "src/pay.ts": "export function charge() { return 1; }",
+      "src/checkout.ts": [
+        'import { charge } from "./pay";',
+        "export function run() {",
+        "  charge();",
+        "  charge();",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const callers = vx2.callers("charge");
+    vx2.close();
+    expect(callers.map((n) => n.qualifiedName)).toEqual(["run"]);
+  });
+
   it("refs with readWrite=write finds the attempts assignment", () => {
     const writes = vx.refs("attempts", { readWrite: "write" });
     expect(writes.length).toBeGreaterThan(0);
@@ -194,5 +213,17 @@ describe("Rinnegan library", () => {
     await vx2.indexAll();
     expect(vx2.testsFor("zzzNoSuchSymbolAnywhere")).toEqual([]);
     vx2.close();
+  });
+
+  it("callers finds the caller across a NodeNext .js-spec import (F4)", async () => {
+    const root2 = fixture({
+      "src/a.ts": "export function fn() { return 1; }",
+      "src/b.ts": ['import { fn } from "./a.js";', "export function callFn() { fn(); }"].join("\n"),
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const callers = vx2.callers("fn");
+    vx2.close();
+    expect(callers.map((n) => n.qualifiedName)).toEqual(["callFn"]);
   });
 });

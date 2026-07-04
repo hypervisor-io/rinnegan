@@ -38,6 +38,15 @@ function main(){
     expect(r.unresolved).toBeGreaterThan(0);
     expect(r.nodes.find((n) => n.id === u!.target)?.kind).toBe("unresolved");
   });
+
+  it("emits a distinct calls edge per call site, even to the same target (F1)", async () => {
+    const src = ['import { realFn } from "./api.js";', 'realFn("a");', 'realFn("b");'].join("\n");
+    const r = await parseFile("a.ts", src, "typescript");
+    const target = r.nodes.find((n) => n.kind === "unresolved" && n.qualifiedName.endsWith("realFn"))!.id;
+    const calls = r.edges.filter((e) => e.kind === "calls" && e.target === target);
+    expect(calls.length).toBe(2);
+    expect(calls.map((e) => e.line).sort()).toEqual([2, 3]);
+  });
 });
 
 describe("type-aware method resolution", () => {

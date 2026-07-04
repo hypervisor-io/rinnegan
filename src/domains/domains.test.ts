@@ -112,11 +112,15 @@ describe("computeDomains", () => {
     const groupA = srcDomains.find((d) => d.files.includes("src/d1/b.ts"))!;
     const groupB = srcDomains.find((d) => d.files.includes("src/d2/c.ts"))!;
     expect(groupA).not.toBe(groupB);
+    expect(groupA.label).not.toBe(groupB.label); // distinct labels are what renderers must route on
 
     // The real b -> c cross-domain edge must survive despite from === to === "src".
     const crossEdge = edges.find((e) => e.from === "src" && e.to === "src");
     expect(crossEdge).toBeTruthy();
     expect(crossEdge!.weight).toBe(1);
+    // and it must carry the two distinct labels, not just the collided names
+    expect(crossEdge!.fromLabel).toBe(groupA.label);
+    expect(crossEdge!.toLabel).toBe(groupB.label);
   });
 
   it("is deterministic: byte-identical across two computeDomains calls on a rebuilt store", async () => {

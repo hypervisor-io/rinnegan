@@ -1,7 +1,10 @@
 import type { GraphStore } from "../graph/store.js";
 
-export interface Domain { name: string; files: string[]; entrypoints: string[] } // files sorted
-export interface DomainEdge { from: string; to: string; weight: number } // between domain names
+export interface Domain { name: string; label: string; files: string[]; entrypoints: string[] } // files sorted
+// from/to: display names (human-facing renderers). fromLabel/toLabel: the internal
+// propagation labels the edge was actually aggregated on — names can collide (see
+// computeDomains Rule 5); renderers that need correct routing must key on these.
+export interface DomainEdge { from: string; to: string; fromLabel: string; toLabel: string; weight: number }
 
 function bump(m: Map<string, Map<string, number>>, a: string, b: string, inc = 1): void {
   let row = m.get(a);
@@ -109,7 +112,7 @@ export function computeDomains(store: GraphStore): { domains: Domain[]; edges: D
   for (const [label, members] of groups) {
     const name = commonDirPrefix(members) || label;
     nameOfLabel.set(label, name);
-    domains.push({ name, files: members, entrypoints: members.filter((m) => roles.get(m) === "entrypoint") });
+    domains.push({ name, label, files: members, entrypoints: members.filter((m) => roles.get(m) === "entrypoint") });
   }
   domains.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 
@@ -129,7 +132,7 @@ export function computeDomains(store: GraphStore): { domains: Domain[]; edges: D
   const edges: DomainEdge[] = [];
   for (const [la, row] of labelEdges) {
     const from = nameOfLabel.get(la)!;
-    for (const [lb, weight] of row) edges.push({ from, to: nameOfLabel.get(lb)!, weight });
+    for (const [lb, weight] of row) edges.push({ from, to: nameOfLabel.get(lb)!, fromLabel: la, toLabel: lb, weight });
   }
   edges.sort((a, b) => (a.from !== b.from ? (a.from < b.from ? -1 : 1) : a.to < b.to ? -1 : a.to > b.to ? 1 : 0));
 
