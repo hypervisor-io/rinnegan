@@ -50,6 +50,74 @@ machine output.
 **Agent loop.** `understand` the task → `lookup` anything about to be called → write
 the patch → `verify` it → apply.
 
+## How it works
+
+A repo becomes a queryable graph in five stages, then gets budgeted into an answer:
+
+```mermaid
+flowchart LR
+  subgraph Ingest
+    A["scanFiles<br/>git-first, .gitignore-respected"] --> B["two-gate change detection<br/>mtime, then hash"]
+  end
+
+  subgraph Parse
+    C1["TS/JS compiler AST"]
+    C2["tree-sitter<br/>19 languages"]
+    C3["bespoke<br/>Elixir, Terraform, SFC, docs, manifests"]
+  end
+
+  subgraph Store
+    D[("SQLite graph<br/>nodes + edges: provenance, confidence, FTS5")]
+    E["role classification"]
+  end
+
+  F["cross-file import resolution<br/>unresolved → ast_inferred"]
+
+  subgraph Semantic
+    G["TF-IDF → truncated SVD, LSA, + BM25<br/>deterministic, no model"]
+  end
+
+  subgraph Signal
+    H["seed → spine<br/>anchor + bounded graph walk"]
+    I["rank<br/>relevance × centrality × trust × role"]
+    J["budget<br/>MAP → SIGNATURES → DETAIL"]
+  end
+
+  subgraph Surfaces
+    K["CLI"]
+    L["MCP<br/>understand, lookup, verify, map"]
+    M["library"]
+  end
+
+  B --> C1 & C2 & C3
+  C1 & C2 & C3 -->|"provenance-tagged nodes+edges"| D
+  D --> E
+  D --> F
+  F --> G
+  G --> H
+  E -.->|"role weight"| I
+  H --> I --> J
+  J --> K & L & M
+```
+
+**The agent loop**, and what `verify` actually does before an edit is trusted:
+
+```mermaid
+flowchart LR
+  U["understand the task"] --> L["lookup<br/>anything about to be called"]
+  L --> P["write the patch"]
+  P --> V["verify the diff"]
+  V -->|clean| AP["apply"]
+  V -->|findings| P
+
+  subgraph Overlay["verify's overlay (always rolls back)"]
+    direction LR
+    V1["parse post-image"] --> V2["check against graph<br/>unknown-symbol, signature, blast-radius"] --> V3["rollback"]
+  end
+
+  V --> V1
+```
+
 ## Sharing the index (CI cache)
 
 The index is one file: `.rinnegan/graph.db`. Cache it in CI so warm runs update instead
@@ -155,3 +223,40 @@ the symbols they cover.
 
 **Next:** richer cross-file/type-aware resolution (method calls), more languages,
 daemon hardening (Win/WSL/SMB), eval corpus growth.
+
+## Changelog
+
+Terse and reverse-chronological; see `git log` for the full detail this compresses.
+
+### 2026-07-04 — v0.2: anti-hallucination roadmap
+- **Added:** freshness guard (mtime/hash reconciliation before every read) · file role
+  classification + `inventory` (roles, inbound edges, orphans) · `verify` engine
+  (unified-diff parser, graph-native unknown-symbol/signature-echo/blast-radius/
+  parse-failure checks) behind a pre-commit gate · `lookup` (exact facts, explicit NOT
+  FOUND) · domain detection (label propagation) + `map` (md/mermaid/json) +
+  `understand --scope` · `docs --stale` · test linkage (`tests <symbol>`, covered-by
+  lines) · corpus fingerprint in `status` · `lookup`/`verify` as MCP tools.
+- **Fixed** (same-day follow-up pass): per-call-site edges (dedup keyed by line, not
+  just symbol pair); `removeFile` downgrades inbound cross-file edges to `unresolved`
+  instead of deleting them, and downgraded placeholders now re-resolve through
+  aliased/default imports; domain/mermaid labels route correctly under name
+  collisions; `.js`/`.mjs`/`.cjs` specifiers resolve to their TS source (NodeNext).
+
+### 2026-07-03 — roadmap planning
+- **Added:** the anti-hallucination roadmap spec, a spec amendment (freshness guard,
+  lookup tool, stale-docs, test linkage), and a 20-task/5-phase implementation plan —
+  docs only, no code.
+
+### 2026-06-30 — v0.1: core engine
+- **Added:** the whole v0.1 core in one day — provenance-centric node/edge types,
+  SQLite graph store (FTS5 + WAL), git-first scanner, scope-aware TS/JS extractor,
+  cross-file import resolution, deterministic LSA + BM25 + RRF semantic search, the
+  minimal-spine signal engine with harmonic MAP/SIGNATURES/DETAIL output, library +
+  CLI + single-tool MCP server, an incremental file watcher, type-aware method-call
+  resolution, 19 tree-sitter grammars (Python/Go/Rust/Java/PHP/C#/Ruby/C/C++/Swift/
+  Kotlin/Scala/Zig/Lua/Solidity/Objective-C/Bash/OCaml/ReScript), Elixir + Terraform
+  bespoke extractors, Vue/Svelte/Astro SFC support, docs/manifest/MCP-config
+  extractors, the agent MCP `install` command, and the determinism/slice-quality
+  eval corpus.
+- **Changed:** renamed the project veridex → rinnegan (package, bin, CLI, MCP, lib,
+  index dir) and added the Rinnegan branding/hero banner.
