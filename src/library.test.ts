@@ -214,4 +214,16 @@ describe("Rinnegan library", () => {
     expect(vx2.testsFor("zzzNoSuchSymbolAnywhere")).toEqual([]);
     vx2.close();
   });
+
+  it("callers finds the caller across a NodeNext .js-spec import (F4)", async () => {
+    const root2 = fixture({
+      "src/a.ts": "export function fn() { return 1; }",
+      "src/b.ts": ['import { fn } from "./a.js";', "export function callFn() { fn(); }"].join("\n"),
+    });
+    const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
+    await vx2.indexAll();
+    const callers = vx2.callers("fn");
+    vx2.close();
+    expect(callers.map((n) => n.qualifiedName)).toEqual(["callFn"]);
+  });
 });
