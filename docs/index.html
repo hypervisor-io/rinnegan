@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rinnegan — the all-seeing eye for your codebase</title>
+<meta name="description" content="Rinnegan is a verifiable code-knowledge engine. For any task it returns the minimal, provenance-tagged slice of a codebase an AI agent needs to write precise, hallucination-free code. Deterministic, no neural embeddings." />
+
+<link rel="icon" type="image/png" href="branding/rinnegan-icon.png" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Rinnegan — the all-seeing eye for your codebase" />
+<meta property="og:description" content="A verifiable code-knowledge engine for AI agents. Minimal, provenance-tagged signal slices. Deterministic, no neural embeddings." />
+<meta property="og:image" content="https://hypervisor-io.github.io/rinnegan/branding/rinnegan-hero.png" />
+<meta property="og:url" content="https://hypervisor-io.github.io/rinnegan/" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --ink:#08070D;
+    --ink-2:#0C0B15;
+    --ink-3:#100E1C;
+    --line:rgba(140,126,255,0.13);
+    --line-2:rgba(140,126,255,0.22);
+    --rin:#7B6CFF;
+    --rin-bright:#9C8FFF;
+    --rin-dim:#4A4370;
+    --truth:#35D6A0;
+    --text:#EAE8F6;
+    --muted:#9491AC;
+    --faint:#6B6883;
+    --font-d:"Space Grotesk",system-ui,sans-serif;
+    --font-b:"Manrope",system-ui,sans-serif;
+    --font-m:"JetBrains Mono",ui-monospace,monospace;
+    --wrap:1180px;
+    --r:14px;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+  body{
+    margin:0;
+    background:var(--ink);
+    color:var(--text);
+    font-family:var(--font-b);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+
+  /* ambient indigo field, fixed so it never repaints on scroll */
+  .field{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    background:
+      radial-gradient(680px 520px at 78% -6%, rgba(123,108,255,0.16), transparent 62%),
+      radial-gradient(720px 620px at 8% 8%, rgba(90,74,220,0.10), transparent 60%),
+      radial-gradient(900px 700px at 50% 118%, rgba(53,214,160,0.05), transparent 60%);
+  }
+  .grain{
+    position:fixed;inset:0;z-index:1;pointer-events:none;opacity:.4;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  }
+
+  a{color:inherit;text-decoration:none}
+  .wrap{width:100%;max-width:var(--wrap);margin:0 auto;padding:0 28px;position:relative;z-index:2}
+  .mono{font-family:var(--font-m)}
+
+  /* ---------- nav ---------- */
+  header.nav{position:sticky;top:0;z-index:40;
+    background:rgba(8,7,13,0.72);backdrop-filter:blur(14px) saturate(140%);
+    border-bottom:1px solid var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:66px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--font-d);font-weight:600;letter-spacing:.14em;font-size:14px;text-transform:uppercase}
+  .brand img{width:26px;height:26px;mix-blend-mode:screen;
+    -webkit-mask-image:radial-gradient(circle,#000 60%,rgba(0,0,0,0) 78%);
+    mask-image:radial-gradient(circle,#000 60%,rgba(0,0,0,0) 78%);
+    filter:drop-shadow(0 0 8px rgba(123,108,255,.6))}
+  .nav-links{display:flex;align-items:center;gap:30px}
+  .nav-links a{color:var(--muted);font-size:14px;font-weight:500;transition:color .2s}
+  .nav-links a:hover{color:var(--text)}
+  .nav-cta{font-family:var(--font-d);font-size:13px;font-weight:600;letter-spacing:.03em;
+    color:var(--text);border:1px solid var(--line-2);padding:9px 16px;border-radius:9px;
+    transition:border-color .2s,background .2s}
+  .nav-cta:hover{border-color:var(--rin);background:rgba(123,108,255,.1)}
+  @media(max-width:860px){.nav-links a:not(.nav-cta){display:none}}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;min-height:calc(100dvh - 66px);display:flex;align-items:center;padding:40px 0 64px}
+  .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:40px;align-items:center;width:100%}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-m);
+    font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--rin-bright);
+    padding:6px 13px;border:1px solid var(--line-2);border-radius:999px;background:rgba(123,108,255,.06)}
+  .eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--truth);
+    box-shadow:0 0 10px var(--truth)}
+  h1{font-family:var(--font-d);font-weight:600;font-size:clamp(38px,5vw,58px);
+    line-height:1.04;letter-spacing:-0.025em;margin:22px 0 0}
+  h1 .glow{color:transparent;background:linear-gradient(180deg,#fff,var(--rin-bright));
+    -webkit-background-clip:text;background-clip:text}
+  .lede{color:var(--muted);font-size:clamp(17px,1.9vw,20px);line-height:1.55;max-width:33ch;margin:22px 0 0}
+  .lede b{color:var(--text);font-weight:600}
+  .cta-row{display:flex;flex-wrap:wrap;gap:14px;margin-top:32px}
+  .btn{display:inline-flex;align-items:center;gap:9px;font-family:var(--font-d);font-weight:600;
+    font-size:15px;padding:13px 22px;border-radius:11px;transition:transform .12s,box-shadow .2s,background .2s,border-color .2s}
+  .btn:active{transform:translateY(1px)}
+  .btn-primary{background:var(--rin);color:#0A0814;box-shadow:0 8px 30px -8px rgba(123,108,255,.7)}
+  .btn-primary:hover{background:var(--rin-bright);box-shadow:0 12px 40px -10px rgba(123,108,255,.85)}
+  .btn-ghost{color:var(--text);border:1px solid var(--line-2)}
+  .btn-ghost:hover{border-color:var(--rin);background:rgba(123,108,255,.08)}
+  .arrow{font-family:var(--font-m);transition:transform .2s}
+  .btn:hover .arrow{transform:translateX(3px)}
+
+  .hero-eye{position:relative;display:grid;place-items:center;aspect-ratio:1/1;max-width:520px;margin-left:auto}
+  .hero-eye img{width:100%;height:auto;position:relative;z-index:2;mix-blend-mode:screen;
+    -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 54%,rgba(0,0,0,0) 72%);
+    mask-image:radial-gradient(circle at 50% 50%,#000 54%,rgba(0,0,0,0) 72%);
+    filter:drop-shadow(0 0 60px rgba(123,108,255,.30))}
+  .ripple{position:absolute;border:1px solid var(--rin);border-radius:50%;opacity:0;z-index:1;
+    width:44%;height:44%}
+  .hero-eye .r1{animation:ripple 5.5s ease-out infinite}
+  .hero-eye .r2{animation:ripple 5.5s ease-out infinite 1.8s}
+  .hero-eye .r3{animation:ripple 5.5s ease-out infinite 3.6s}
+  @keyframes ripple{0%{opacity:.5;transform:scale(.5)}80%{opacity:0}100%{opacity:0;transform:scale(2.1)}}
+  .spin{animation:spin 90s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media(max-width:900px){
+    .hero-grid{grid-template-columns:1fr;gap:8px}
+    .hero-eye{grid-row:1;max-width:340px;margin:0 auto}
+    .lede{max-width:46ch}
+  }
+
+  /* ---------- section scaffold ---------- */
+  section{position:relative;z-index:2;padding:104px 0}
+  .band{border-top:1px solid var(--line)}
+  .kicker{font-family:var(--font-m);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--rin-bright);margin:0 0 18px}
+  h2{font-family:var(--font-d);font-weight:600;font-size:clamp(30px,4.2vw,46px);line-height:1.06;letter-spacing:-0.02em;margin:0}
+  .sec-lede{color:var(--muted);font-size:18px;line-height:1.6;max-width:60ch;margin:18px 0 0}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(22px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1)}
+  .reveal.in{opacity:1;transform:none}
+  @media (prefers-reduced-motion:reduce){
+    .reveal{opacity:1;transform:none;transition:none}
+    .ripple,.spin,.r1,.r2,.r3{animation:none !important}
+  }
+
+  /* ---------- provenance ladder ---------- */
+  .prov-grid{display:grid;grid-template-columns:.82fr 1.18fr;gap:56px;align-items:start;margin-top:52px}
+  .ladder{display:flex;flex-direction:column;gap:10px}
+  .rung{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:18px;
+    padding:15px 18px;border:1px solid var(--line);border-radius:12px;background:var(--ink-2)}
+  .rung .tag{font-family:var(--font-m);font-size:13px;font-weight:500;padding:4px 10px;border-radius:7px;white-space:nowrap}
+  .rung .desc{color:var(--muted);font-size:14.5px;line-height:1.4}
+  .rung .conf{font-family:var(--font-m);font-size:12px;color:var(--faint)}
+  .rung.truth{border-color:rgba(53,214,160,.4);background:linear-gradient(90deg,rgba(53,214,160,.09),transparent 80%)}
+  .rung.truth .tag{background:rgba(53,214,160,.14);color:var(--truth);border:1px solid rgba(53,214,160,.4)}
+  .rung.truth .desc{color:var(--text)}
+  .rung.v1 .tag{background:rgba(123,108,255,.16);color:var(--rin-bright)}
+  .rung.v2{opacity:.9}.rung.v2 .tag{background:rgba(123,108,255,.13);color:#8f83e6}
+  .rung.v3{opacity:.78}.rung.v3 .tag{background:rgba(123,108,255,.10);color:#7a70c4}
+  .rung.v4{opacity:.66}.rung.v4 .tag{background:rgba(123,108,255,.07);color:#6a6299}
+  .rung.dim{opacity:.55;border-style:dashed}
+  .rung.dim .tag{background:transparent;color:var(--faint);border:1px dashed var(--line-2)}
+  .prov-note{position:sticky;top:96px}
+  .prov-note h2{margin-bottom:0}
+  .prov-quote{margin-top:26px;font-family:var(--font-d);font-size:19px;line-height:1.45;color:var(--text)}
+  .prov-quote .hl{color:var(--truth)}
+  @media(max-width:900px){.prov-grid{grid-template-columns:1fr;gap:30px}.prov-note{position:static}}
+  @media(max-width:520px){.rung{grid-template-columns:auto 1fr;gap:12px}.rung .conf{display:none}}
+
+  /* ---------- pipeline ---------- */
+  .pipe{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:52px;
+    background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .step{background:var(--ink-2);padding:26px 24px;position:relative}
+  .step .n{font-family:var(--font-m);font-size:12px;color:var(--rin);letter-spacing:.1em}
+  .step h3{font-family:var(--font-d);font-weight:600;font-size:19px;margin:12px 0 8px}
+  .step p{color:var(--muted);font-size:14px;line-height:1.5;margin:0}
+  .step .kw{color:var(--rin-bright);font-family:var(--font-m);font-size:12.5px}
+  @media(max-width:820px){.pipe{grid-template-columns:1fr}}
+
+  /* ---------- terminal ---------- */
+  .term-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:48px;align-items:center;margin-top:48px}
+  .term{background:#0A0912;border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;
+    box-shadow:0 30px 80px -30px rgba(0,0,0,.8)}
+  .term-bar{display:flex;align-items:center;gap:8px;padding:12px 15px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+  .term-bar i{width:11px;height:11px;border-radius:50%;background:#2a2838;display:inline-block}
+  .term-bar span{margin-left:8px;font-family:var(--font-m);font-size:12px;color:var(--faint)}
+  .term pre{margin:0;padding:20px;font-family:var(--font-m);font-size:13px;line-height:1.75;overflow-x:auto;color:#c9c6df}
+  .term .p{color:var(--truth)}
+  .term .c{color:var(--rin-bright)}
+  .term .g{color:var(--faint)}
+  .term .t{color:var(--rin)}
+  .tier-list{display:flex;flex-direction:column;gap:22px}
+  .tier{display:grid;grid-template-columns:auto 1fr;gap:18px;align-items:baseline}
+  .tier .lbl{font-family:var(--font-m);font-size:13px;color:var(--rin-bright);white-space:nowrap;padding-top:2px}
+  .tier h3{font-family:var(--font-d);font-size:18px;margin:0 0 4px;font-weight:600}
+  .tier p{margin:0;color:var(--muted);font-size:14.5px;line-height:1.5}
+  @media(max-width:900px){.term-grid{grid-template-columns:1fr;gap:30px}}
+
+  /* ---------- loop ---------- */
+  .loop{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin-top:44px}
+  .node{font-family:var(--font-d);font-weight:600;font-size:15px;padding:13px 20px;border-radius:11px;
+    border:1px solid var(--line-2);background:var(--ink-2)}
+  .node.key{border-color:var(--rin);color:var(--rin-bright);box-shadow:0 0 24px -6px rgba(123,108,255,.5)}
+  .sep{font-family:var(--font-m);color:var(--rin);font-size:18px}
+  .loop-back{margin-top:20px;color:var(--faint);font-family:var(--font-m);font-size:13px}
+  .verify-note{margin-top:34px;padding:24px 26px;border:1px solid var(--line);border-left:2px solid var(--rin);
+    border-radius:10px;background:var(--ink-2);max-width:70ch}
+  .verify-note b{color:var(--text)}
+  .verify-note{color:var(--muted);font-size:15px}
+
+  /* ---------- stats ---------- */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:40px;margin-top:12px}
+  .stat .num{font-family:var(--font-d);font-weight:600;font-size:clamp(34px,4.6vw,52px);
+    line-height:1;letter-spacing:-0.02em;color:var(--text)}
+  .stat .num .u{color:var(--rin);font-size:.6em}
+  .stat .lab{color:var(--muted);font-size:13.5px;margin-top:12px;line-height:1.45}
+  @media(max-width:820px){.stats{grid-template-columns:repeat(2,1fr);gap:34px 28px}}
+
+  /* ---------- coverage marquee ---------- */
+  .marquee{margin-top:48px;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent);
+    mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
+  .track{display:flex;gap:14px;width:max-content;animation:scroll 46s linear infinite}
+  .marquee:hover .track{animation-play-state:paused}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+  .lang{font-family:var(--font-m);font-size:14px;color:var(--muted);border:1px solid var(--line);
+    padding:9px 16px;border-radius:9px;background:var(--ink-2);white-space:nowrap}
+  .cov-note{color:var(--muted);font-size:15px;max-width:64ch;margin:36px 0 0}
+  .cov-note b{color:var(--text)}
+  @media (prefers-reduced-motion:reduce){.track{animation:none;flex-wrap:wrap;width:auto}.marquee{mask-image:none;-webkit-mask-image:none}}
+
+  /* ---------- quickstart ---------- */
+  .qs-grid{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:start;margin-top:48px}
+  .code{background:#0A0912;border:1px solid var(--line-2);border-radius:var(--r);padding:22px 24px;
+    font-family:var(--font-m);font-size:13.5px;line-height:2;overflow-x:auto}
+  .code .cm{color:var(--faint)}
+  .code .cmd{color:var(--text)}
+  .code .cmd::before{content:"$ ";color:var(--rin)}
+  .code .out{color:var(--rin-bright)}
+  .qs-copy h3{font-family:var(--font-d);font-size:20px;font-weight:600;margin:0 0 10px}
+  .qs-copy p{color:var(--muted);margin:0 0 26px;font-size:15px;line-height:1.6}
+  .qs-copy p:last-child{margin-bottom:0}
+  .qs-copy code{font-family:var(--font-m);font-size:13px;color:var(--rin-bright);
+    background:rgba(123,108,255,.1);padding:2px 7px;border-radius:6px}
+  @media(max-width:900px){.qs-grid{grid-template-columns:1fr;gap:30px}}
+
+  /* ---------- final cta ---------- */
+  .final{text-align:center;padding:120px 0}
+  .final h2{font-size:clamp(34px,5.4vw,60px);max-width:16ch;margin:0 auto}
+  .final .lede{color:var(--muted);font-size:19px;max-width:52ch;margin:22px auto 0}
+  .final .cta-row{justify-content:center}
+  .final-eye{width:82px;height:82px;margin:0 auto 30px;mix-blend-mode:screen;
+    -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 54%,rgba(0,0,0,0) 74%);
+    mask-image:radial-gradient(circle at 50% 50%,#000 54%,rgba(0,0,0,0) 74%);
+    filter:drop-shadow(0 0 26px rgba(123,108,255,.6))}
+
+  /* ---------- footer ---------- */
+  footer{border-top:1px solid var(--line);padding:44px 0;position:relative;z-index:2}
+  .foot{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .foot .l{display:flex;align-items:center;gap:11px;font-family:var(--font-d);font-weight:600;letter-spacing:.1em;font-size:13px;text-transform:uppercase;color:var(--muted)}
+  .foot .l img{width:22px;height:22px;opacity:.85;mix-blend-mode:screen;
+    -webkit-mask-image:radial-gradient(circle,#000 60%,rgba(0,0,0,0) 78%);
+    mask-image:radial-gradient(circle,#000 60%,rgba(0,0,0,0) 78%)}
+  .foot .r{display:flex;gap:24px;font-size:14px;color:var(--faint)}
+  .foot .r a:hover{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="field"></div>
+<div class="grain"></div>
+
+<header class="nav">
+  <div class="wrap nav-in">
+    <a class="brand" href="#top"><img src="branding/rinnegan-icon.png" alt="" />Rinnegan</a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#provenance">Provenance</a>
+      <a href="#coverage">Coverage</a>
+      <a href="#start">Quickstart</a>
+      <a class="nav-cta" href="https://github.com/hypervisor-io/rinnegan">Get started</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <span class="eyebrow">Verifiable code-knowledge engine</span>
+        <h1>The all-seeing eye<br />for your <span class="glow">codebase</span>.</h1>
+        <p class="lede">For any task, Rinnegan returns the <b>minimal, provenance-tagged slice</b> an AI agent needs to write precise, hallucination-free code.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#start">Get started <span class="arrow">-&gt;</span></a>
+          <a class="btn btn-ghost" href="#how">See how it works</a>
+        </div>
+      </div>
+      <div class="hero-eye">
+        <span class="ripple r1"></span><span class="ripple r2"></span><span class="ripple r3"></span>
+        <img class="spin" src="branding/rinnegan-icon.png" alt="The Rinnegan: concentric rings perceiving every path through a codebase" />
+      </div>
+    </div>
+  </section>
+
+  <!-- PROVENANCE (signature) -->
+  <section class="band" id="provenance">
+    <div class="wrap">
+      <div class="prov-grid">
+        <div class="prov-note">
+          <p class="kicker">Provenance on every fact</p>
+          <h2>Every edge knows how it was found.</h2>
+          <p class="prov-quote">Only <span class="hl">ast_exact</span> is ground truth. Everything below it is visibly labeled, carries a confidence, and is never presented as certain.</p>
+        </div>
+        <div class="ladder reveal">
+          <div class="rung truth"><span class="tag">ast_exact</span><span class="desc">Resolved directly from the compiler AST.</span><span class="conf">1.00</span></div>
+          <div class="rung v1"><span class="tag">ast_inferred</span><span class="desc">Inferred across files, structurally sound.</span><span class="conf">0.80</span></div>
+          <div class="rung v2"><span class="tag">heuristic</span><span class="desc">Matched by a language-aware rule.</span><span class="conf">0.65</span></div>
+          <div class="rung v3"><span class="tag">lexical</span><span class="desc">Name matched, scope unconfirmed.</span><span class="conf">0.45</span></div>
+          <div class="rung v4"><span class="tag">latent</span><span class="desc">Surfaced by semantic similarity.</span><span class="conf">0.30</span></div>
+          <div class="rung dim"><span class="tag">unresolved</span><span class="desc">Boundary reached. Marked, never guessed.</span><span class="conf">0.00</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS / pipeline -->
+  <section class="band" id="how">
+    <div class="wrap">
+      <h2>A repo becomes a queryable graph, then a budgeted answer.</h2>
+      <p class="sec-lede">Six ordered stages turn source into signal. No neural embeddings, no tokenizer, no external API. The same corpus produces a byte-identical index every time.</p>
+      <div class="pipe reveal">
+        <div class="step"><div class="n">01 / Ingest</div><h3>Scan</h3><p>Git-first, gitignore-respected. <span class="kw">Two-gate</span> change detection: mtime, then hash.</p></div>
+        <div class="step"><div class="n">02 / Parse</div><h3>Extract</h3><p>TS/JS compiler AST, tree-sitter for 19 grammars, bespoke extractors for the rest.</p></div>
+        <div class="step"><div class="n">03 / Store</div><h3>Graph</h3><p>SQLite nodes and edges with <span class="kw">provenance</span>, confidence, and FTS5 search.</p></div>
+        <div class="step"><div class="n">04 / Resolve</div><h3>Link</h3><p>Cross-file import resolution. Anything unproven downgrades to <span class="kw">unresolved</span>, honestly.</p></div>
+        <div class="step"><div class="n">05 / Rank</div><h3>Weigh</h3><p>Relevance x centrality x trust x role. A bounded graph walk from the seed.</p></div>
+        <div class="step"><div class="n">06 / Serve</div><h3>Budget</h3><p>Position-ordered output across CLI, MCP, and library. Highest signal at the edges.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HARMONIC MEMORY / terminal -->
+  <section class="band">
+    <div class="wrap">
+      <h2>Three zoom tiers, one budget.</h2>
+      <p class="sec-lede">The model gets the shape first and the exact lines last. Deterministic, whitespace-minified, provenance-tagged. No LLM summarization in the loop.</p>
+      <div class="term-grid">
+        <div class="term reveal">
+          <div class="term-bar"><i></i><i></i><i></i><span>rinnegan</span></div>
+<pre><span class="p">$</span> <span class="c">rinnegan understand</span> <span class="g">"how does verify roll back"</span>
+
+<span class="t">MAP</span>         src/verify/engine.ts  · applyOverlay
+<span class="t">SIGNATURES</span>  applyOverlay(diff): Overlay        <span class="g">[ast_exact]</span>
+            checkGraph(post): Finding[]        <span class="g">[ast_exact]</span>
+            rollback(overlay): void            <span class="g">[ast_exact]</span>
+<span class="t">DETAIL</span>      // parse post-image, check, revert
+            const o = applyOverlay(diff)       <span class="g">[ast_exact]</span>
+            try { return checkGraph(o.post) }
+            finally { rollback(o) }            <span class="g">[ast_exact]</span></pre>
+        </div>
+        <div class="tier-list reveal">
+          <div class="tier"><span class="lbl">MAP</span><div><h3>The shape</h3><p>Every relevant symbol, grouped by file. Where things live before you read a line.</p></div></div>
+          <div class="tier"><span class="lbl">SIGNATURES</span><div><h3>The spine</h3><p>Definitions only. The minimal graph walk from the seed, at a glance.</p></div></div>
+          <div class="tier"><span class="lbl">DETAIL</span><div><h3>The lines</h3><p>Minified, provenance-tagged source, ranked to fit the budget. The exact code to edit.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AGENT LOOP -->
+  <section class="band">
+    <div class="wrap">
+      <h2>Read, check, write, verify, apply.</h2>
+      <p class="sec-lede">Rinnegan is machinery for AI coding agents, not a graph tool for people. It hands an attention-limited model the exact signal it needs, and nothing else.</p>
+      <div class="loop reveal">
+        <span class="node key">understand</span><span class="sep">-&gt;</span>
+        <span class="node key">lookup</span><span class="sep">-&gt;</span>
+        <span class="node">write the patch</span><span class="sep">-&gt;</span>
+        <span class="node key">verify</span><span class="sep">-&gt;</span>
+        <span class="node">apply</span>
+      </div>
+      <p class="loop-back reveal">verify returns findings -&gt; back to write. clean -&gt; apply.</p>
+      <div class="verify-note reveal"><b>What verify actually does:</b> it parses the post-edit image, checks it against the graph for unknown symbols, signature drift, and blast radius, then rolls the overlay back every time. Unknown-symbol and parse errors block the commit. Signature echoes and blast-radius warnings inform, but never fail it.</div>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <section class="band">
+    <div class="wrap">
+      <h2>Small slice, all ground truth.</h2>
+      <p class="sec-lede">Numbers from the README, measured on real repositories. Not marketing rounding.</p>
+      <div class="stats reveal" style="margin-top:44px">
+        <div class="stat"><div class="num">85<span class="u">%</span></div><div class="lab">smaller task slice than dumping the repo, all ast_exact</div></div>
+        <div class="stat"><div class="num">0.3<span class="u">%</span></div><div class="lab">of a 1M context window for a full task slice</div></div>
+        <div class="stat"><div class="num">~6<span class="u">s</span></div><div class="lab">to index 380 TS files and 9.9k symbols, cold</div></div>
+        <div class="stat"><div class="num">23</div><div class="lab">languages, plus docs, manifests, and MCP configs</div></div>
+        <div class="stat"><div class="num">153</div><div class="lab">tests, gated on byte-determinism and slice quality</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- COVERAGE -->
+  <section class="band" id="coverage">
+    <div class="wrap">
+      <h2>Twenty-three languages, one code path per grammar.</h2>
+      <div class="marquee reveal">
+        <div class="track" id="langtrack" aria-hidden="true"></div>
+      </div>
+      <p class="cov-note reveal">Composite single-file components (<b>Vue, Svelte, Astro</b>) get their script block sliced out, parsed with the precise TS/JS extractor, and line-remapped back. Non-code is covered too: <b>Markdown</b> links and wikilinks, dependency <b>manifests</b>, and <b>MCP configs</b>. Adding a tree-sitter grammar is one table entry.</p>
+    </div>
+  </section>
+
+  <!-- QUICKSTART -->
+  <section class="band" id="start">
+    <div class="wrap">
+      <p class="kicker">Quickstart</p>
+      <h2>Point it at your repo.</h2>
+      <div class="qs-grid">
+        <pre class="code reveal"><span class="cm"># install and build (Node 20+)</span>
+<span class="cmd">npm install</span>
+<span class="cmd">npm run build</span>
+
+<span class="cm"># build the knowledge graph</span>
+<span class="cmd">rinnegan index</span>
+
+<span class="cm"># get a minimal, provenance-tagged slice</span>
+<span class="cmd">rinnegan understand "how does auth work"</span>
+
+<span class="cm"># gate a commit on the graph</span>
+<span class="cmd">rinnegan verify --staged</span></pre>
+        <div class="qs-copy reveal">
+          <h3>Any agent, one transport</h3>
+          <p>Run <code>rinnegan install claude</code> (or cursor, codex, kiro, pi, windsurf, gemini) to emit MCP config. <code>rinnegan mcp</code> starts the server over stdio, with <code>understand</code>, <code>lookup</code>, <code>verify</code>, and <code>map</code>.</p>
+          <h3>Share the index in CI</h3>
+          <p>The whole index is one file: <code>.rinnegan/graph.db</code>. Cache it with <code>actions/cache</code> so warm runs update instead of reindexing cold. A <code>status</code> fingerprint confirms two machines hold the same corpus.</p>
+          <h3>Ship it as a pre-commit gate</h3>
+          <p>Wire <code>rinnegan verify --staged</code> into a git hook. Unknown symbols and parse failures block the commit before an edit is ever trusted.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="band final">
+    <div class="wrap">
+      <img class="final-eye" src="branding/rinnegan-icon.png" alt="" />
+      <h2>Give your agent the eye.</h2>
+      <p class="lede">Deterministic, fully local, and honest about every fact it hands over. Same corpus in, byte-identical index out.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/hypervisor-io/rinnegan">Get started <span class="arrow">-&gt;</span></a>
+        <a class="btn btn-ghost" href="https://github.com/hypervisor-io/rinnegan#how-it-works">Read the docs</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div class="l"><img src="branding/rinnegan-icon.png" alt="" />Rinnegan</div>
+    <div class="r">
+      <a href="https://github.com/hypervisor-io/rinnegan">GitHub</a>
+      <a href="https://github.com/hypervisor-io/rinnegan#install--use">Docs</a>
+      <span>MIT licensed</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // scroll reveal
+  (function(){
+    var els = document.querySelectorAll('.reveal');
+    if(!('IntersectionObserver' in window)){els.forEach(function(e){e.classList.add('in')});return;}
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(en){ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    },{threshold:.14});
+    els.forEach(function(e){io.observe(e)});
+  })();
+
+  // language marquee (duplicated for seamless loop)
+  (function(){
+    var langs = ["TypeScript","JavaScript","Python","Go","Rust","Java","PHP","C#","Ruby","C","C++","Swift","Kotlin","Scala","Zig","Lua","Solidity","Objective-C","Bash","OCaml","ReScript","Elixir","Terraform"];
+    var track = document.getElementById('langtrack');
+    var html = langs.map(function(l){return '<span class="lang">'+l+'</span>';}).join('');
+    track.innerHTML = html + html;
+  })();
+</script>
+</body>
+</html>
