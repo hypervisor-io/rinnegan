@@ -206,7 +206,7 @@ Working end-to-end: SQLite provenance graph · scope-aware TS/JS extraction
 **Python + Go extractors** (tree-sitter WASM) · deterministic sparse LSA+BM25 semantic
 search · signal engine (minimal spine → provenance rank → budget → position-order →
 whitespace-minimized verifiable render) · **incremental file watcher** · library + CLI +
-MCP server. 153 tests, including byte-determinism and slice-quality gates.
+MCP server. 170 tests, including byte-determinism and slice-quality gates.
 
 **v0.2 surface:** a freshness guard (mtime/hash change detection, exposed as a
 fingerprint) keeps reads honest about a stale index, file roles back `inventory`, the
