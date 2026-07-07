@@ -192,6 +192,25 @@ describe("Indexer", () => {
     store.close();
   });
 
+  it("analyzer-version gate: a stale analyzer version reindexes an unchanged file (hash(code) invalidation)", async () => {
+    const root = fixture({ "a.ts": "export function one() {}" });
+    const store = GraphStore.open(":memory:");
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+
+    // Simulate the file having been indexed by an OLDER analyzer: identical
+    // content and mtime, only the analyzer version is stale. A pure
+    // content/mtime gate would skip it and keep the old AST output; the
+    // analyzer-version gate must force a reparse.
+    const meta = store.getFileMeta("a.ts")!;
+    store.setFileMeta("a.ts", { ...meta, analyzerVersion: meta.analyzerVersion - 1 });
+
+    expect((await ix.sync(root)).reindexed).toBe(1);
+    // once reparsed at the current version, it settles back to a no-op
+    expect((await ix.sync(root)).reindexed).toBe(0);
+    store.close();
+  });
+
   it("indexAll assigns roles", async () => {
     const root = fixture({
       "package.json": JSON.stringify({ main: "./src/index.ts" }),

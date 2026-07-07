@@ -88,18 +88,19 @@ describe("GraphStore", () => {
     s.close();
   });
 
-  it("fingerprint pins the sha256(path + NUL + hash + NL, sorted by path) algorithm and is insertion-order independent", () => {
-    const expected = createHash("sha256").update("a.ts\0h1\n").update("b.ts\0h2\n").digest("hex");
+  it("fingerprint pins the sha256(path + NUL + hash + NUL + analyzerVersion + NL, sorted by path) algorithm and is insertion-order independent", () => {
+    const line = (p: string, h: string, v: number) => `${p}\0${h}\0${v}\n`;
+    const expected = createHash("sha256").update(line("a.ts", "h1", 1)).update(line("b.ts", "h2", 1)).digest("hex");
 
     const forward = GraphStore.open(":memory:");
-    forward.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
-    forward.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
+    forward.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library", analyzerVersion: 1 });
+    forward.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library", analyzerVersion: 1 });
     expect(forward.fingerprint()).toBe(expected);
     forward.close();
 
     const reverse = GraphStore.open(":memory:");
-    reverse.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library" });
-    reverse.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library" });
+    reverse.setFileMeta("b.ts", { hash: "h2", mtimeMs: 1, nodeIds: [], role: "library", analyzerVersion: 1 });
+    reverse.setFileMeta("a.ts", { hash: "h1", mtimeMs: 1, nodeIds: [], role: "library", analyzerVersion: 1 });
     expect(reverse.fingerprint()).toBe(expected);
     reverse.close();
   });

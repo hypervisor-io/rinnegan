@@ -30,11 +30,12 @@ CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 
 CREATE TABLE IF NOT EXISTS files (
-  path     TEXT PRIMARY KEY,
-  hash     TEXT NOT NULL,
-  mtime_ms REAL NOT NULL,
-  node_ids TEXT NOT NULL,
-  role     TEXT NOT NULL DEFAULT 'library'
+  path             TEXT PRIMARY KEY,
+  hash             TEXT NOT NULL,
+  mtime_ms         REAL NOT NULL,
+  node_ids         TEXT NOT NULL,
+  role             TEXT NOT NULL DEFAULT 'library',
+  analyzer_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS imports (

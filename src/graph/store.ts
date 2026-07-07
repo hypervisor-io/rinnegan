@@ -15,6 +15,8 @@ export interface FileMeta {
   mtimeMs: number;
   nodeIds: string[];
   role: string;
+  /** ANALYZER_VERSION that produced this file's nodes/edges — see parse/extract.ts. */
+  analyzerVersion: number;
 }
 
 /** Lowercase tokens from an identifier-ish string: camelCase + snake + dots split. */
@@ -54,9 +56,11 @@ export class GraphStore {
     this.db.pragma("synchronous = NORMAL");
     this.db.exec(SCHEMA);
 
-    // Additive migration: old DBs predate the `role` column.
+    // Additive migrations: old DBs predate these columns. analyzer_version
+    // defaults to 0 so pre-existing rows read as stale and reparse on next sync.
     const cols = (this.db.pragma("table_info(files)") as { name: string }[]).map((c) => c.name);
     if (!cols.includes("role")) this.db.exec(`ALTER TABLE files ADD COLUMN role TEXT NOT NULL DEFAULT 'library'`);
+    if (!cols.includes("analyzer_version")) this.db.exec(`ALTER TABLE files ADD COLUMN analyzer_version INTEGER NOT NULL DEFAULT 0`);
   }
 
   /** Memoized prepared statement — compile each SQL once, reuse for every call. */
@@ -201,14 +205,14 @@ export class GraphStore {
 
   getFileMeta(path: string): FileMeta | undefined {
     const r = this.stmt(`SELECT * FROM files WHERE path = ?`).get(path) as
-      | { path: string; hash: string; mtime_ms: number; node_ids: string; role: string | null } | undefined;
-    return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids), role: r.role ?? "library" } : undefined;
+      | { path: string; hash: string; mtime_ms: number; node_ids: string; role: string | null; analyzer_version: number } | undefined;
+    return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids), role: r.role ?? "library", analyzerVersion: r.analyzer_version } : undefined;
   }
 
   setFileMeta(path: string, meta: FileMeta): void {
     this.stmt(
-      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids,role) VALUES (?,?,?,?,?)`,
-    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds), meta.role);
+      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids,role,analyzer_version) VALUES (?,?,?,?,?,?)`,
+    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds), meta.role, meta.analyzerVersion);
   }
 
   /** Role per indexed file path, sorted by path. */
@@ -345,8 +349,10 @@ export class GraphStore {
   /** Corpus identity: same fingerprint ⇒ same index bytes (determinism promise). */
   fingerprint(): string {
     const h = createHash("sha256");
-    const rows = this.stmt(`SELECT path, hash FROM files ORDER BY path`).all() as { path: string; hash: string }[];
-    for (const r of rows) h.update(`${r.path}\0${r.hash}\n`);
+    // analyzer_version participates: same file bytes analyzed by a different
+    // analyzer are a different index, so the fingerprint must differ too.
+    const rows = this.stmt(`SELECT path, hash, analyzer_version FROM files ORDER BY path`).all() as { path: string; hash: string; analyzer_version: number }[];
+    for (const r of rows) h.update(`${r.path}\0${r.hash}\0${r.analyzer_version}\n`);
     return h.digest("hex");
   }
 }

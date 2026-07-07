@@ -8,6 +8,17 @@ import { extractElixir } from "./special/elixir.js";
 import { extractSfc } from "./special/sfc.js";
 import { extractTerraform } from "./special/terraform.js";
 
+/**
+ * Version of the parse/extract pipeline. BUMP THIS whenever a change to any
+ * extractor, tree-sitter SPEC, or resolution logic would produce different
+ * nodes/edges for the same source. The indexer folds it into the skip gate and
+ * corpus fingerprint, so a bump forces every file to reparse on the next sync
+ * (cocoindex's `hash(code)` invalidation, minus per-transform granularity).
+ */
+// ponytail: single global analyzer version, hand-bumped. Split per-language if
+// grammars ever need to invalidate independently.
+export const ANALYZER_VERSION = 1;
+
 export interface ImportRef {
   localName: string;
   importedName: string; // exported name in the target module ("default", "*", or the symbol)

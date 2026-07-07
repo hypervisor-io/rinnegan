@@ -2,7 +2,7 @@ import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { GraphStore } from "../graph/store.js";
 import { scanFiles, contentHash, LANG_EXT, type ScannedFile } from "../ingest/scanner.js";
-import { parseFile } from "../parse/extract.js";
+import { parseFile, ANALYZER_VERSION } from "../parse/extract.js";
 import { resolveImports } from "../resolution/imports.js";
 import { classifyFile, buildClassifyContext, type ClassifyContext } from "../ingest/classify.js";
 
@@ -43,12 +43,16 @@ export class Indexer {
     const abs = join(root, f.path);
     const st = statSync(abs);
     const meta = this.store.getFileMeta(f.path);
+    // Both gates also require the file to have been analyzed at the current
+    // ANALYZER_VERSION; a stale version means the stored nodes/edges came from
+    // older parse logic and must be regenerated even if the bytes are identical.
+    const fresh = meta?.analyzerVersion === ANALYZER_VERSION;
 
-    if (meta && meta.mtimeMs === st.mtimeMs) return false; // gate 1
+    if (meta && fresh && meta.mtimeMs === st.mtimeMs) return false; // gate 1
     const content = readFileSync(abs, "utf8");
     const hash = contentHash(content);
-    if (meta && meta.hash === hash) {
-      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds, role: meta.role });
+    if (meta && fresh && meta.hash === hash) {
+      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds, role: meta.role, analyzerVersion: ANALYZER_VERSION });
       return false; // gate 2
     }
 
@@ -60,7 +64,7 @@ export class Indexer {
       for (const e of res.edges) this.store.insertEdge(e);
       this.store.setImports(f.path, res.imports);
     });
-    this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id), role });
+    this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id), role, analyzerVersion: ANALYZER_VERSION });
     return true;
   }
 
