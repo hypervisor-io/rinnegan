@@ -33,6 +33,8 @@ See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for t
 ## Install & use
 
 ```bash
+git clone https://github.com/hypervisor-io/rinnegan.git
+cd rinnegan
 npm install        # better-sqlite3 ships a prebuilt binary (Node 20+)
 npm run build
 node bin/rinnegan.js index            # build the SQLite knowledge graph
