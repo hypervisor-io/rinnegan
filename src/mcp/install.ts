@@ -38,6 +38,13 @@ export const TARGETS: InstallTarget[] = [
     render: jsonBlock,
   },
   {
+    id: "cline",
+    name: "Cline",
+    configPath: "cline_mcp_settings.json  (Cline panel -> MCP Servers -> Configure)",
+    format: "json",
+    render: jsonBlock,
+  },
+  {
     id: "codex",
     name: "Codex CLI",
     configPath: "~/.codex/config.toml",
@@ -65,6 +72,19 @@ export const TARGETS: InstallTarget[] = [
     configPath: "~/.gemini/settings.json",
     format: "json",
     render: jsonBlock,
+  },
+  {
+    id: "opencode",
+    name: "opencode",
+    // opencode uses its own schema: `mcp` (not `mcpServers`), type "local", command as one array.
+    configPath: "opencode.json  (project)  or  ~/.config/opencode/opencode.json",
+    format: "json",
+    render: (cmd, args) =>
+      JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", mcp: { rinnegan: { type: "local", command: [cmd, ...args], enabled: true } } },
+        null,
+        2,
+      ),
   },
 ];
 

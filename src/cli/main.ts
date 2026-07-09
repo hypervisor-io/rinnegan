@@ -259,7 +259,7 @@ export function buildProgram(out: Out, cwd: string): Command {
 
   program
     .command("install [agent]")
-    .description("Print MCP config to connect Rinnegan to a coding agent (claude-code, cursor, codex, kiro, pi, windsurf, gemini)")
+    .description("Print MCP config to connect Rinnegan to a coding agent (claude-code, cursor, cline, codex, kiro, pi, windsurf, gemini, opencode)")
     .action(async (agent?: string) => {
       const { renderInstall } = await import("../mcp/install.js");
       // prefer a global `rinnegan` binary; fall back to this entry's absolute path

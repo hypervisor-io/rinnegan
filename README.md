@@ -172,8 +172,8 @@ gets the shape first and the exact lines last:
 `DETAIL` (whitespace-minified, provenance-tagged source to edit). Deterministic — no LLM
 summarization (that is cognee's bloat; we reject it and keep only the multi-resolution idea).
 
-**Any agent.** `rinnegan install <agent>` emits MCP config for Claude Code, Cursor, Codex,
-Kiro, Pi, Windsurf, Gemini. MCP stdio is the universal transport.
+**Any agent.** `rinnegan install <agent>` emits MCP config for Claude Code, Cursor, Cline,
+Codex, Kiro, Pi, Windsurf, Gemini, opencode. MCP stdio is the universal transport.
 
 ## Coverage (v0.1)
 
