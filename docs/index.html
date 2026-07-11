@@ -360,7 +360,7 @@
       <h2>A repo becomes a queryable graph, then a budgeted answer.</h2>
       <p class="sec-lede">Six ordered stages turn source into signal. No neural embeddings, no tokenizer, no external API. The same corpus produces a byte-identical index every time.</p>
       <div class="pipe reveal">
-        <div class="step"><div class="n">01 / Ingest</div><h3>Scan</h3><p>Git-first, gitignore-respected. <span class="kw">Two-gate</span> change detection: mtime, then hash.</p></div>
+        <div class="step"><div class="n">01 / Ingest</div><h3>Scan</h3><p>Git-first, gitignore-respected. <span class="kw">Two-gate</span> change detection: mtime, then hash. An analyzer change invalidates every skip.</p></div>
         <div class="step"><div class="n">02 / Parse</div><h3>Extract</h3><p>TS/JS compiler AST, tree-sitter for 19 grammars, bespoke extractors for the rest.</p></div>
         <div class="step"><div class="n">03 / Store</div><h3>Graph</h3><p>SQLite nodes and edges with <span class="kw">provenance</span>, confidence, and FTS5 search.</p></div>
         <div class="step"><div class="n">04 / Resolve</div><h3>Link</h3><p>Cross-file import resolution. Anything unproven downgrades to <span class="kw">unresolved</span>, honestly.</p></div>
@@ -466,7 +466,7 @@
           <h3>Any agent, one transport</h3>
           <p>Run <code>rinnegan install claude</code> (or cursor, cline, codex, kiro, pi, windsurf, gemini, opencode) to emit MCP config — or copy it from <a href="#agents">connect your agent</a>. <code>rinnegan mcp</code> starts the server over stdio, with <code>understand</code>, <code>lookup</code>, <code>verify</code>, and <code>map</code>.</p>
           <h3>Share the index in CI</h3>
-          <p>The whole index is one file: <code>.rinnegan/graph.db</code>. Cache it with <code>actions/cache</code> so warm runs update instead of reindexing cold. A <code>status</code> fingerprint confirms two machines hold the same corpus.</p>
+          <p>The whole index is one file: <code>.rinnegan/graph.db</code>. Cache it with <code>actions/cache</code> so warm runs update instead of reindexing cold. A <code>status</code> fingerprint confirms two machines hold the same corpus and analyzer.</p>
           <h3>Ship it as a pre-commit gate</h3>
           <p>Wire <code>rinnegan verify --staged</code> into a git hook. Unknown symbols and parse failures block the commit before an edit is ever trusted.</p>
         </div>
