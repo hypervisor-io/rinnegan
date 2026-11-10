@@ -5,6 +5,7 @@ import { scanFiles, contentHash, LANG_EXT, type ScannedFile } from "../ingest/sc
 import { parseFile, ANALYZER_VERSION } from "../parse/extract.js";
 import { resolveImports } from "../resolution/imports.js";
 import { classifyFile, buildClassifyContext, type ClassifyContext } from "../ingest/classify.js";
+import type { ParseResult } from "../parse/extract.js";
 
 export interface IndexStats {
   scanned: number;
@@ -57,7 +58,16 @@ export class Indexer {
     }
 
     if (meta) this.store.removeFile(f.path);
-    const res = await parseFile(f.path, content, f.language);
+    let res: ParseResult;
+    try {
+      res = await parseFile(f.path, content, f.language);
+    } catch (e) {
+      // One unparseable file must not abort the whole index (e.g. a grammar/
+      // runtime mismatch in one tree-sitter wasm). Record nothing, so the file
+      // is retried on the next run; the index stays consistent. Log and move on.
+      console.error(`rinnegan index: parse failed, file skipped: ${f.path} (${e instanceof Error ? e.message : String(e)})`);
+      return false;
+    }
     const role = classifyFile(f.path, content, f.language, res.imports.map((i) => i.moduleSpec), ctx);
     this.store.tx(() => {
       for (const n of res.nodes) this.store.insertNode(n);
