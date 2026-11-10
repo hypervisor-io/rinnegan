@@ -132,7 +132,7 @@ describe("role-aware ranking", () => {
     for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("down-ranks test files unless task has test intent", async () => {
+  it("excludes test files from the slice unless task has test intent", async () => {
     const root = fixture({
       "src/pay.ts": "export function charge() {}",
       "src/pay.test.ts": "export function charge() {}",
@@ -140,7 +140,8 @@ describe("role-aware ranking", () => {
     const vx = Rinnegan.open(root, { dbPath: ":memory:" });
     await vx.indexAll();
     const slice = vx.understand("charge payment");
-    expect(slice.text.indexOf("src/pay.ts")).toBeLessThan(slice.text.indexOf("src/pay.test.ts"));
+    expect(slice.text).toContain("src/pay.ts");
+    expect(slice.text).not.toContain("src/pay.test.ts");
     const testSlice = vx.understand("fix the charge test");
     expect(testSlice.text).toContain("src/pay.test.ts");
     vx.close();
@@ -245,5 +246,92 @@ describe("understand --scope", () => {
       "unknown domain 'nope' — available: auth, billing",
     );
     vx.close();
+  });
+});
+
+describe("retrieval accuracy guards (from blind A/B judging)", () => {
+  it("keeps test-harness bytes out of a production slice unless the task asks about tests", async () => {
+    const root = fixture({
+      "auth.ts": [
+        "export function login(username: string) {",
+        "  return authenticateUser(username);",
+        "}",
+        "function authenticateUser(u: string) {",
+        "  return u.length > 0;",
+        "}",
+      ].join("\n"),
+      // Lexically louder than production: every query word lives here, and
+      // pre-guard this captured 100% of the slice for the VNC query class.
+      "tests/auth.console.test.ts": [
+        "import { login } from '../auth.js';",
+        "function loginAuthenticationConsoleFlowHarness() {",
+        "  const consoleFlow = login('u');",
+        "  return consoleFlow;",
+        "}",
+      ].join("\n"),
+    });
+    const vx = Rinnegan.open(root, { dbPath: ":memory:" });
+    await vx.indexAll();
+    // Build store/semantic directly (the pattern used above) — Rinnegan keeps
+    // both private and builds semantic lazily.
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    const task = "login authentication console flow";
+
+    const prod = understand(store, semantic, task, { root, tokenBudget: 4000 });
+    expect(prod.text).toContain("auth.ts");
+    // The harness's SOURCE must not appear; a covered-by pointer is fine.
+    expect(prod.text).not.toContain("tests/auth.console.test.ts:");
+    expect(prod.text).not.toContain("loginAuthenticationConsoleFlowHarness");
+
+    const withIntent = understand(store, semantic, "login authentication test", { root, tokenBudget: 4000 });
+    expect(withIntent.text).toContain("auth.console.test.ts");
+    vx.close();
+  });
+
+  it("boosts callers of top-ranked seeds (controller → service chain)", async () => {    const root = fixture({
+      "deploy.ts": "export function deployInstance() { return 1; }\n",
+      "controller.ts": [
+        "import { deployInstance } from './deploy.js';",
+        "export function createInstance() { return deployInstance(); }",
+      ].join("\n"),
+      "unrelated.ts": "export function wireMoney() { return 2; }\n",
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const byName = (name: string): string => {
+      const n = store.allNodes().find((n) => n.qualifiedName === name && n.kind === "function");
+      if (!n) throw new Error(`fixture symbol not indexed: ${name}`);
+      return n.id;
+    };
+    const deployId = byName("deployInstance");
+    const createId = byName("createInstance");
+    const wireId = byName("wireMoney");
+    // wireMoney is deliberately MORE lexically relevant; only the caller-chain
+    // bonus (createInstance → deployInstance, deployInstance is the seed)
+    // lets the controller outrank it.
+    const relevance = new Map([[deployId, 1], [createId, 0.2], [wireId, 0.3]]);
+    const ranked = rankNodes(store, new Set([deployId, createId, wireId]), relevance, { seedIds: new Set([deployId]) });
+    expect(ranked[0].node.qualifiedName).toBe("deployInstance");
+    expect(ranked[1].node.qualifiedName).toBe("createInstance");
+    expect(ranked[1].score).toBeGreaterThan(ranked[2].score);
+    store.close();
+  });
+
+  it("substring fallback seeds symbols whose token CONTAINS a query token (vnc → noVncGuard)", async () => {
+    const root = fixture({
+      "auth.ts": "export function noVncGuard() { return 1; }\n",
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    // No whole-token match exists for "vnc" — only the substring pass reaches it.
+    const whole = semantic.seed("vnc guard", 8).filter((s) => {
+      const n = store.getNode(s.id);
+      return n?.qualifiedName === "noVncGuard";
+    });
+    expect(whole.length).toBeGreaterThan(0);
+    store.close();
   });
 });

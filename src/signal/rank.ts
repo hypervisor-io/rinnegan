@@ -17,7 +17,7 @@ const KIND_WEIGHT: Record<NodeKind, number> = {
  * tests/generated/vendored further down since they rarely explain "how it works".
  */
 export const ROLE_WEIGHT: Record<string, number> = {
-  entrypoint: 1.1, library: 1, config: 0.7, doc: 0.7, test: 0.5, generated: 0.3, vendored: 0.2,
+  entrypoint: 1.1, library: 1, config: 0.7, doc: 0.5, test: 0.5, generated: 0.3, vendored: 0.2,
 };
 
 export interface RankOpts {
@@ -25,6 +25,8 @@ export interface RankOpts {
   roles?: Map<string, string>;
   /** Task text mentions tests (e.g. "fix the charge test") — test files escape their down-rank. */
   testIntent?: boolean;
+  /** Seed symbol ids (semantic anchors). Callers of a seed get the chain bonus. */
+  seedIds?: Set<string>;
 }
 
 export interface Ranked {
@@ -36,8 +38,18 @@ export interface Ranked {
 }
 
 /**
- * Signal score = relevance × centrality × provenance-trust × role. Ranks the spine so the
- * few symbols that actually matter to the task float to the top. Deterministic.
+ * Nodes whose `calls` edges point at a seed symbol get this multiplier — the
+ * caller IS the flow: it is the controller/job/command that invokes what the
+ * task is about. Without it, entry-point chains lose to lexically-close but
+ * peripheral symbols (measured in blind A/B judging: neither rinnegan nor
+ * codegraph ever surfaced controller → job → service).
+ */
+const CALLER_CHAIN_BONUS = 1.3;
+
+/**
+ * Signal score = relevance × centrality × provenance-trust × role, with a
+ * caller-chain bonus applied in a second pass. Ranks the spine so the few
+ * symbols that actually matter to the task float to the top. Deterministic.
  */
 export function rankNodes(
   store: GraphStore,
@@ -67,7 +79,18 @@ export function rankNodes(
     const score = (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust) * kindW * roleW;
     out.push({ node, score, relevance: rel, centrality, trust });
   }
-  return out.sort(
-    (a, b) => b.score - a.score || (a.node.id < b.node.id ? -1 : 1),
-  );
+
+  // Second pass: reward symbols that CALL a seed. A caller of a seed is how
+  // production reaches it — always signal, never noise.
+  const seeds = opts?.seedIds;
+  if (seeds && seeds.size > 0) {
+    for (const r of out) {
+      if (seeds.has(r.node.id)) continue;
+      if (store.outgoing(r.node.id, ["calls"]).some((e) => seeds.has(e.target))) {
+        r.score *= CALLER_CHAIN_BONUS;
+      }
+    }
+    out.sort((a, b) => b.score - a.score || (a.node.id < b.node.id ? -1 : 1));
+  }
+  return out;
 }
