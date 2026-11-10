@@ -38,6 +38,8 @@ describe("classifyFile", () => {
     expect(c("run.sh", "#!/usr/bin/env bash\n", "bash")).toBe("entrypoint");
     expect(c("index.ts")).toBe("entrypoint");                       // index.* at package root
     expect(c("vite.config.ts")).toBe("config");
+    expect(c("docs/mockups/screens.js", "", "javascript")).toBe("doc"); // doc-asset tree, not library
+    expect(c("documentation/examples/demo.ts", "", "typescript")).toBe("doc");
     expect(c("package.json", "{}", "manifest")).toBe("config");
     expect(c("README.md", "", "markdown")).toBe("doc");
     expect(c("src/graph/store.ts")).toBe("library");

@@ -49,6 +49,10 @@ export function classifyFile(
   if (ctx.manifestDirs.has(dir) && /^(main|index)\.[^.]+$/.test(base)) return "entrypoint";
   if (CONFIG_RE.test(p) || language === "manifest" || language === "mcp") return "config";
   if (language === "markdown") return "doc";
+  // Doc-asset trees: mockups and example code under docs/ routinely
+  // out-lexically-match production code and must not win slices
+  // (docs/new_ui JS mockups once captured 100% of a VNC slice).
+  if (/(^|\/)(docs?|documentation)\//.test(p)) return "doc";
   return "library";
 }
 

@@ -17,7 +17,9 @@ import { extractTerraform } from "./special/terraform.js";
  */
 // ponytail: single global analyzer version, hand-bumped. Split per-language if
 // grammars ever need to invalidate independently.
-export const ANALYZER_VERSION = 1;
+// 2: classifyFile now roles doc-asset trees (docs/, documentation/) as "doc" —
+//    stored roles must be re-derived or those files keep their stale role.
+export const ANALYZER_VERSION = 2;
 
 export interface ImportRef {
   localName: string;

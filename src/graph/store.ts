@@ -148,6 +148,25 @@ export class GraphStore {
     return rows.map((r) => this.rowToNode(r));
   }
 
+  /**
+   * Substring fallback over the FTS token text: finds symbols whose token text
+   * CONTAINS a fragment — query "vnc" reaches `novnc`, `vncTicket`. FTS MATCH
+   * is whole-token only, so without this those symbols are invisible. LIKE on
+   * the fts column is a scan; bounded by LIMIT. Deterministic id tie-break.
+   */
+  searchTokensSubstring(fragments: string[], limit: number): GraphNode[] {
+    const frags = [...new Set(fragments)]
+      .map((f) => f.toLowerCase().replace(/[%_]/g, ""))
+      .filter((f) => f.length >= 3);
+    if (frags.length === 0 || limit <= 0) return [];
+    const where = frags.map(() => `f.tokens LIKE ?`).join(" OR ");
+    const rows = this.stmt(
+      `SELECT n.* FROM nodes_fts f JOIN nodes n ON n.id = f.id
+       WHERE ${where} ORDER BY n.id LIMIT ?`,
+    ).all(...frags.map((f) => `%${f}%`), limit) as NodeRow[];
+    return rows.map((r) => this.rowToNode(r));
+  }
+
   /** BM25 score per node id for a query (lower bm25 = better; we return -bm25 as score). */
   bm25Scores(query: string, limit: number): { id: string; score: number }[] {
     const toks = [...new Set(basicTokens(query))];
