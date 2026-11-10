@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "tsc && node -e \"require('fs').copyFileSync('src/graph/schema.sql','dist/graph/schema.sql')\"",
+    "postinstall": "node scripts/patch-wts.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "cli": "tsx src/cli/main.ts",
@@ -33,5 +34,10 @@
     "tsx": "^4.19.0",
     "vitest": "^2.1.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.1": true,
+    "esbuild@0.21.5": true
+  }
 }
