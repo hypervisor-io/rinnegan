@@ -171,8 +171,11 @@ export class GraphStore {
       n.signature ?? null, n.docstring ?? null, n.isExported ? 1 : 0);
 
     const tokens = basicTokens(`${n.qualifiedName} ${n.signature ?? ""} ${n.docstring ?? ""}`).join(" ");
-    this.stmt(`DELETE FROM nodes_fts WHERE id = ?`).run(n.id);
-    this.stmt(`INSERT INTO nodes_fts (id, tokens) VALUES (?, ?)`).run(n.id, tokens);
+    // Key FTS rows by the node's rowid. `id UNINDEXED` cannot be deleted by key;
+    // every such delete would full-scan nodes_fts (quadratic indexing).
+    const row = this.stmt(`SELECT rowid AS rid FROM nodes WHERE id = ?`).get(n.id) as { rid: number };
+    this.stmt(`DELETE FROM nodes_fts WHERE rowid = ?`).run(row.rid);
+    this.stmt(`INSERT INTO nodes_fts (rowid, id, tokens) VALUES (?, ?, ?)`).run(row.rid, n.id, tokens);
   }
 
   insertEdge(e: GraphEdge): void {
@@ -433,8 +436,8 @@ export class GraphStore {
 
     const del = this.db.transaction(() => {
       for (const id of meta.nodeIds) {
+        this.stmt(`DELETE FROM nodes_fts WHERE rowid = (SELECT rowid FROM nodes WHERE id = ?)`).run(id);
         this.stmt(`DELETE FROM nodes WHERE id = ?`).run(id);
-        this.stmt(`DELETE FROM nodes_fts WHERE id = ?`).run(id);
         this.stmt(`DELETE FROM edges WHERE source = ? OR target = ?`).run(id, id);
       }
       this.stmt(`DELETE FROM files WHERE path = ?`).run(path);
