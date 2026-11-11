@@ -48,6 +48,25 @@ describe("classifyFile", () => {
     expect(c("src/util.ts", "", "typescript", ["testing"])).toBe("library"); // "testing" is Go stdlib, not a JS test framework
     expect(c("src/main.go", "", "go", ["testing"])).toBe("test");            // but it is one for Go
   });
+  it("bench/benchmark harness trees are role test — no framework import needed", () => {
+    expect(c("benches/rt_multi_threaded.rs", "", "rust")).toBe("test"); // tokio criterion bench
+    expect(c("benches/util.rs", "", "rust")).toBe("test");
+    expect(c("foo/benchmarks/x.ts", "", "typescript")).toBe("test");
+    expect(c("foo/bench/x.go", "", "go")).toBe("test");
+    // Whole-segment only: a symbol/file named *bench* is not a bench tree.
+    expect(c("src/benchmarks.ts", "", "typescript")).toBe("library");
+    expect(c("src/benchmarking/y.ts", "", "typescript")).toBe("library");
+    // Go's conventional _test.go suffix still classifies (unchanged).
+    expect(c("internal/rt/io/driver_test.go", "", "go")).toBe("test");
+  });
+  it("a #[cfg(test)] module in a production Rust file does not make the whole file test", () => {
+    const src = [
+      "pub fn turn() -> u32 { 1 }",
+      "#[cfg(test)]",
+      "mod tests { use super::*; }",
+    ].join("\n");
+    expect(c("runtime/io/driver.rs", src, "rust")).toBe("library");
+  });
   it("buildClassifyContext reads package.json bin/main/exports", () => {
     const root = fixture({ "package.json": JSON.stringify({ main: "./dist/index.js", bin: { x: "./bin/x.js" } }) });
     const ctx2 = buildClassifyContext(root, ["package.json"]);

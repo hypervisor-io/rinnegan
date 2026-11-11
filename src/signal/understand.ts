@@ -46,6 +46,14 @@ const ANCHOR_STOPWORDS = new Set([
 ]);
 
 /**
+ * Full-file body prior → ranking pool. At most this many best-scoring files
+ * contribute their definition symbols, and only at or above this normalized
+ * score (1 = the single best file for the task).
+ */
+const FILE_PRIOR_FILES = 3;
+const FILE_PRIOR_MIN = 0.5;
+
+/**
  * The signal engine: task → minimal, provenance-tagged, position-ordered,
  * whitespace-minimized slice. Sized to leave a 1M window almost entirely free.
  */
@@ -139,13 +147,35 @@ export function understand(
   }
 
   const spine = extractSpine(store, anchors, { depth, maxNodes, include: inScope });
+  const fileRelevance = store.fileRelevance(task);
+  // The body prior is a RANKER input, but ranking can only reorder what the
+  // spine already contains — and on some corpora the spine provably cannot
+  // reach the file that implements the concept: Rust extraction emits `calls`
+  // edges only (no cross-file `references`), so tokio's driver.rs — the top
+  // file by body BM25 for "…drive IO resources with epoll" — is unreachable
+  // from any anchor. Seat the best prior files' definition symbols in the
+  // ranking pool itself; anchors are untouched, so seeding stays lexical.
+  const priorFiles = [...fileRelevance]
+    .filter(([file, score]) => score >= FILE_PRIOR_MIN && roles.get(file) !== "test" && roles.get(file) !== "doc")
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, FILE_PRIOR_FILES)
+    .map(([file]) => file);
+  const pool = new Set(spine);
+  for (const file of priorFiles) {
+    if (scopeFiles && !scopeFiles.has(file)) continue;
+    for (const n of store.nodesInFile(file)) {
+      if (DEF_ANCHOR_KINDS.has(n.kind)) pool.add(n.id);
+    }
+  }
   const relevance = semantic.relevance(task);
   // Coverage anchors matched a distinct query token directly — treat them as
   // strong for this task even when latent/BM25 mass sits on common words.
   for (const id of coverageAnchors) {
     relevance.set(id, Math.max(relevance.get(id) ?? 0, 0.7));
   }
-  const rankedAll = rankNodes(store, spine, relevance, { roles, testIntent, seedIds: new Set(anchors) });
+  const rankedAll = rankNodes(store, pool, relevance, {
+    roles, testIntent, seedIds: new Set(anchors), fileRelevance,
+  });
   const nonTest = rankedAll.filter((r) => !isTestFile(r.node));
   const ranked = !testIntent && nonTest.length > 0 ? nonTest : rankedAll;
 

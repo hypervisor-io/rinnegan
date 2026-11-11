@@ -171,6 +171,19 @@ payload is a versioned, little-endian binary blob (bump `SEMANTIC_CACHE_VERSION`
 the built model bit for bit, so answers are identical either way. On a read-only
 `graph.db` queries still work; they just rebuild instead of caching.
 
+### File-body BM25 prior (retrieval)
+
+Symbol text alone is captured by lexically-loud files: a query about "driving IO
+with epoll" finds `benches/*.rs` and test helpers before `runtime/io/driver.rs`,
+because only symbol names are indexed. `index` therefore also writes each file's
+BODY tokens to `files_fts` (deterministic: `basicTokens` in file order, capped at
+4096 tokens per file). `understand` scores those bodies with BM25, normalizes the
+best file to 1, and multiplies each symbol's rank by `1 + 2·score`. The three best
+prior files (score ≥ 0.5, never test/doc) additionally seat their definition
+symbols in the ranking pool, because a ranker can only reorder what the spine
+already contains — and on Rust, whose extractor emits no cross-file `references`,
+the implementing file is otherwise unreachable. Anchors stay purely lexical.
+
 ## Pre-commit gate
 
 ```bash

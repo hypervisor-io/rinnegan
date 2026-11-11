@@ -335,3 +335,85 @@ describe("retrieval accuracy guards (from blind A/B judging)", () => {
     store.close();
   });
 });
+
+describe("file-body BM25 prior (files_fts)", () => {
+  afterAll(() => {
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  // Two symbols with the SAME name and the SAME relevance — only the file BODY
+  // separates them. Pre-prior, `handle` in sched/queue.rs is indistinguishable
+  // from `handle` in io/driver.rs, exactly the capture the A/B run showed.
+  const FILES = {
+    "runtime/io/driver.rs": [
+      "// epoll event loop drives every io resource",
+      "pub fn handle(resource: u32) -> u32 { resource }",
+    ].join("\n"),
+    "runtime/sched/queue.rs": [
+      "// scheduling queue bookkeeping",
+      "pub fn handle(resource: u32) -> u32 { resource }",
+    ].join("\n"),
+  };
+
+  it("ranks the symbol whose file body matches the task higher at equal relevance", async () => {
+    const root = fixture(FILES);
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+
+    const driver = store.allNodes().find((n) => n.filePath === "runtime/io/driver.rs" && n.kind === "function")!;
+    const queue = store.allNodes().find((n) => n.filePath === "runtime/sched/queue.rs" && n.kind === "function")!;
+    const ids = new Set([driver.id, queue.id]);
+    const relevance = new Map([[driver.id, 0.5], [queue.id, 0.5]]); // equal — isolates the file prior
+
+    const prior = store.fileRelevance("how does the runtime drive io resources with epoll");
+    expect(prior.get("runtime/io/driver.rs")).toBe(1);
+    expect(prior.get("runtime/sched/queue.rs") ?? 0).toBe(0);
+
+    const withPrior = rankNodes(store, ids, relevance, { fileRelevance: prior });
+    const byId = (r: typeof withPrior) => new Map(r.map((x) => [x.node.id, x.score]));
+    expect(byId(withPrior).get(driver.id)!).toBeGreaterThan(byId(withPrior).get(queue.id)!);
+    // (1 + 2·1) vs (1 + 2·0): the top file's symbol triples, the unmatched one is untouched.
+    expect(byId(withPrior).get(driver.id)! / byId(withPrior).get(queue.id)!).toBeCloseTo(3, 10);
+
+    // No prior supplied ⇒ old math, identical scores and input order preserved.
+    const without = rankNodes(store, ids, relevance);
+    const noPrior = new Map(without.map((x) => [x.node.id, x.score]));
+    expect(noPrior.get(driver.id)!).toBe(noPrior.get(queue.id)!);
+    expect(without.map((r) => r.node.id)).toEqual([...ids]);
+    store.close();
+  });
+
+  it("feeds the prior into understand() so the matching file's DETAIL leads", async () => {
+    const root = fixture(FILES);
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    const res = understand(store, semantic, "epoll event loop io resource", { root, tokenBudget: 4000 });
+    expect(res.facts[0]?.body ?? "").toContain("runtime/io/driver.rs");
+    store.close();
+  });
+
+  it("seats a prior-top file's symbols in the RANKING pool without making them anchors", async () => {
+    // Rust emits `calls` edges only (no cross-file references), so a file whose
+    // SYMBOL NAMES say nothing about the task is unreachable from any anchor.
+    // Only the body prior can surface it — and it must do so without seeding.
+    const root = fixture({
+      "runtime/api.rs": ["// entry surface", "pub fn start() -> u32 { 1 }"].join("\n"),
+      "runtime/io/driver.rs": [
+        "// the epoll driver turns io readiness into events",
+        "pub fn turn() -> u32 { 2 }",
+      ].join("\n"),
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    const res = understand(store, semantic, "start epoll io readiness", { root, tokenBudget: 4000 });
+
+    expect(store.fileRelevance("start epoll io readiness").get("runtime/io/driver.rs")).toBe(1);
+    const anchorFiles = res.anchors.map((id) => store.getNode(id)?.filePath);
+    expect(anchorFiles).toContain("runtime/api.rs");
+    expect(anchorFiles).not.toContain("runtime/io/driver.rs"); // prior never seeds
+    expect(res.text).toContain("runtime/io/driver.rs:2"); // …but it does re-seat ranking
+    store.close();
+  });
+});

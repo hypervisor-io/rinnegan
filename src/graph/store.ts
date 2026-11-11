@@ -20,6 +20,13 @@ const CACHE_SCHEMA = `CREATE TABLE IF NOT EXISTS semantic_cache (
   payload     BLOB NOT NULL
 )`;
 
+/**
+ * Deterministic per-file token cap for files_fts. Bodies are indexed up to this
+ * many tokens (in file order) so the prior is bounded work regardless of file
+ * size and identical across runs of the same bytes.
+ */
+const FILE_TOKEN_CAP = 4096;
+
 export interface FileMeta {
   hash: string;
   mtimeMs: number;
@@ -240,8 +247,60 @@ export class GraphStore {
     return rows.map((r) => ({ id: r.id, score: -r.b }));
   }
 
+  /**
+   * Store the index-time token text of a file BODY for files_fts. Deterministic:
+   * tokens are basicTokens(content) in file order, capped at FILE_TOKEN_CAP.
+   * An empty body (or one with no usable tokens) drops the row instead of
+   * inserting an empty document, so BM25 never sees a zero-length file.
+   *
+   * The table is created by schema.sql with CREATE TABLE IF NOT EXISTS, so a DB
+   * written by an older rinnegan grows it on the next write open; a read-only
+   * connection never gets here (and never writes).
+   */
+  setFileTokens(filePath: string, content: string): void {
+    if (this.db.readonly) return;
+    const tokens = basicTokens(content).slice(0, FILE_TOKEN_CAP).join(" ");
+    this.stmt(`DELETE FROM files_fts WHERE file = ?`).run(filePath);
+    if (!tokens) return;
+    this.stmt(`INSERT INTO files_fts (file, tokens) VALUES (?, ?)`).run(filePath, tokens);
+  }
+
+  /**
+   * File-level relevance prior: FTS5 BM25 over the file BODY text, converted to
+   * a positive score (bm25 is more-negative-is-better) and normalized against
+   * the best file in the pool, so the top file is 1 and the rest sit in 0..1.
+   * Deterministic: `bm25, file` ordering means ties are broken by path.
+   * Returns an empty map when the table is absent (DB predating files_fts) —
+   * a missing prior must be a no-op, never a failed query.
+   */
+  fileRelevance(query: string, limit = 200): Map<string, number> {
+    const toks = [...new Set(basicTokens(query))];
+    if (toks.length === 0) return new Map();
+    const match = toks.map((t) => `"${t}"`).join(" OR ");
+    let rows: { file: string; b: number }[];
+    try {
+      rows = this.stmt(
+        `SELECT file, bm25(files_fts) AS b FROM files_fts
+         WHERE tokens MATCH ? ORDER BY b, file LIMIT ?`,
+      ).all(match, limit) as { file: string; b: number }[];
+    } catch {
+      return new Map(); // no files_fts table (pre-prior DB) — no prior available
+    }
+    const scored = rows.map((r) => ({ file: r.file, score: -r.b }));
+    let max = 0;
+    for (const s of scored) max = Math.max(max, s.score);
+    if (max <= 0) return new Map();
+    return new Map(scored.map((s) => [s.file, s.score / max]));
+  }
+
   allNodes(): GraphNode[] {
     return (this.stmt(`SELECT * FROM nodes ORDER BY id`).all() as NodeRow[]).map((r) => this.rowToNode(r));
+  }
+
+  /** Every node declared in a file, in source order. Deterministic. */
+  nodesInFile(path: string): GraphNode[] {
+    return (this.stmt(`SELECT * FROM nodes WHERE file_path = ? ORDER BY start_line, id`).all(path) as NodeRow[])
+      .map((r) => this.rowToNode(r));
   }
 
   allEdges(): GraphEdge[] {
@@ -380,6 +439,7 @@ export class GraphStore {
       }
       this.stmt(`DELETE FROM files WHERE path = ?`).run(path);
       this.stmt(`DELETE FROM imports WHERE file = ?`).run(path);
+      this.stmt(`DELETE FROM files_fts WHERE file = ?`).run(path);
 
       for (const d of downgrades) {
         const qn = `<unresolved>.${d.name}`;

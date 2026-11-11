@@ -51,6 +51,12 @@ CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file);
 -- so BM25 ranking sees identifier sub-tokens. `id` is carried UNINDEXED.
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id UNINDEXED, tokens);
 
+-- FTS5 over the BODY of each indexed file (same pre-tokenized text as nodes_fts,
+-- capped deterministically — see GraphStore.setFileTokens). A file-level BM25
+-- score is the query-time prior that keeps a lexically-loud but unrelated file
+-- from capturing an entire slice on symbol names alone.
+CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(file UNINDEXED, tokens);
+
 -- Single-row cache for the semantic (LSA) model, which costs minutes to build on
 -- a large corpus. `fingerprint` is the corpus identity (node count + the same
 -- hash `rinnegan status` prints); a mismatch is a cache miss, never a stale hit.

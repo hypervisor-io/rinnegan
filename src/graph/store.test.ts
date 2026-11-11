@@ -116,6 +116,63 @@ describe("GraphStore", () => {
   });
 });
 
+describe("GraphStore files_fts (file-body prior)", () => {
+  it("scores the file whose BODY holds the rare token, normalized to 0..1", () => {
+    const g = GraphStore.open(":memory:");
+    g.setFileTokens("runtime/io/driver.rs", "the epoll driver turns io resources");
+    g.setFileTokens("logging/admin.ts", "logging admin filters request context");
+    const rel = g.fileRelevance("epoll io");
+    expect(rel.get("runtime/io/driver.rs")).toBe(1); // best file normalizes to exactly 1
+    expect(rel.has("logging/admin.ts")).toBe(false); // no body hit ⇒ absent, not a low score
+    for (const v of rel.values()) {
+      expect(v).toBeGreaterThan(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
+    expect(g.fileRelevance("nothingmatcheshere")).toEqual(new Map());
+    g.close();
+  });
+
+  it("caps a file at 4096 body tokens deterministically, in file order", () => {
+    const g = GraphStore.open(":memory:");
+    // Token 4097 onward is past the cap: "zzzlate" must be invisible.
+    const body = [...Array(4096).fill("filler"), "zzzlate"].join(" ");
+    g.setFileTokens("big.ts", body);
+    expect(g.fileRelevance("filler").get("big.ts")).toBe(1);
+    expect(g.fileRelevance("zzzlate")).toEqual(new Map());
+
+    // Same bytes twice ⇒ same prior (no accumulation, no drift).
+    g.setFileTokens("big.ts", body);
+    expect(g.fileRelevance("filler").get("big.ts")).toBe(1);
+    g.close();
+  });
+
+  it("replaces on re-index and deletes the row for an empty body", () => {
+    const g = GraphStore.open(":memory:");
+    g.setFileTokens("a.ts", "epoll reactor");
+    expect(g.fileRelevance("epoll").get("a.ts")).toBe(1);
+    g.setFileTokens("a.ts", "socket accept"); // body rewritten: old tokens gone
+    expect(g.fileRelevance("epoll")).toEqual(new Map());
+    expect(g.fileRelevance("socket").get("a.ts")).toBe(1);
+    g.setFileTokens("a.ts", ""); // no usable tokens ⇒ row dropped
+    expect(g.fileRelevance("socket")).toEqual(new Map());
+    g.setFileTokens("b.ts", "a b c"); // all 1-char ⇒ basicTokens filters them out
+    expect(g.fileRelevance("a")).toEqual(new Map());
+    g.close();
+  });
+
+  it("returns an empty map when the DB predates files_fts, and never writes read-only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-files-fts-"));
+    const dbPath = join(dir, "graph.db");
+    new Database(dbPath).close(); // bare SQLite file: no schema, no files_fts
+
+    const ro = GraphStore.open(dbPath, { readonly: true });
+    expect(ro.fileRelevance("epoll")).toEqual(new Map()); // missing table is a no-op, not a throw
+    expect(() => ro.setFileTokens("a.ts", "epoll")).not.toThrow(); // silently skipped
+    ro.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
 describe("GraphStore semantic cache", () => {
   it("stores one payload per corpus key and never serves a different key", () => {
     const g = GraphStore.open(":memory:");

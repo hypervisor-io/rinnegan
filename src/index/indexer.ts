@@ -73,6 +73,9 @@ export class Indexer {
       for (const n of res.nodes) this.store.insertNode(n);
       for (const e of res.edges) this.store.insertEdge(e);
       this.store.setImports(f.path, res.imports);
+      // Index-time artifact, not semantic-model state: the file's BODY tokens
+      // give query time a file-level BM25 prior (store.fileRelevance).
+      this.store.setFileTokens(f.path, content);
     });
     this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: res.nodes.map((n) => n.id), role, analyzerVersion: ANALYZER_VERSION });
     return true;

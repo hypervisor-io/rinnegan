@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+import Database from "better-sqlite3";
 import { GraphStore } from "../graph/store.js";
 import { Indexer } from "./indexer.js";
 
@@ -208,6 +209,22 @@ describe("Indexer", () => {
     expect((await ix.sync(root)).reindexed).toBe(1);
     // once reparsed at the current version, it settles back to a no-op
     expect((await ix.sync(root)).reindexed).toBe(0);
+    store.close();
+  });
+
+  it("writes one body-token row per file for files_fts", async () => {
+    const root = fixture({ "a.ts": "export function turn() { return 1; }" });
+    const dbPath = join(root, ".rinnegan", "graph.db");
+    const store = GraphStore.open(dbPath);
+    const ix = new Indexer(store);
+    await ix.indexAll(root);
+    expect(store.fileRelevance("turn").get("a.ts")).toBe(1);
+
+    // Unchanged bytes ⇒ no reparse; the row is replaced, never duplicated.
+    expect((await ix.sync(root)).reindexed).toBe(0);
+    const raw = new Database(dbPath);
+    expect(raw.prepare("SELECT count(*) c FROM files_fts WHERE file = ?").get("a.ts")).toEqual({ c: 1 });
+    raw.close();
     store.close();
   });
 

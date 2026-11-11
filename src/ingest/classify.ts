@@ -10,7 +10,12 @@ export interface ClassifyContext {
 
 const VENDOR_SEGS = new Set(["vendor", "third_party", "vendored"]);
 const GENERATED_RE = /@generated|DO NOT EDIT/;
-const TEST_PATH_RE = /(^|\/)(__tests__|tests?|spec)\/|\.(test|spec)\.[^./]+$|(^|\/)test_[^/]+\.py$|_test\.go$/;
+// Path-segment test/bench markers. `benches/` (Rust criterion) and `bench/`
+// (Go) are pure harness trees: their bytes are lexically loud but never the
+// answer to a production task, so they must not own a slice. `#[cfg(test)]`
+// inside a production file is deliberately NOT a signal — the file's real
+// symbols live there.
+const TEST_PATH_RE = /(^|\/)(__tests__|tests?|spec|bench|benches|benchmark|benchmarks)\/|\.(test|spec)\.[^./]+$|(^|\/)test_[^/]+\.py$|_test\.go$/;
 // Scoped per-language so a bare import name isn't a test signal in the wrong
 // language (e.g. Go's stdlib "testing" package would otherwise false-positive
 // a TypeScript file that imports a module literally named "testing").

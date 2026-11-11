@@ -27,6 +27,13 @@ export interface RankOpts {
   testIntent?: boolean;
   /** Seed symbol ids (semantic anchors). Callers of a seed get the chain bonus. */
   seedIds?: Set<string>;
+  /**
+   * filePath → 0..1 file-body BM25 prior (`GraphStore.fileRelevance(task)`).
+   * Symbols in a file whose BODY speaks the task get up to 3× the score, so a
+   * lexically-loud unrelated file cannot own the slice on symbol names alone.
+   * Omitted ⇒ no prior, the pre-prior math exactly.
+   */
+  fileRelevance?: Map<string, number>;
 }
 
 export interface Ranked {
@@ -76,7 +83,11 @@ export function rankNodes(
     const role = opts?.roles?.get(node.filePath) ?? "library";
     let roleW = ROLE_WEIGHT[role] ?? 1;
     if (opts?.testIntent && role === "test") roleW = 1;
-    const score = (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust) * kindW * roleW;
+    const score =
+      (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust) * kindW * roleW *
+      // File-body prior: a symbol living in a file whose text is about the task
+      // is the better bet than a lexical twin in an unrelated file.
+      (1 + 2 * (opts?.fileRelevance?.get(node.filePath) ?? 0));
     out.push({ node, score, relevance: rel, centrality, trust });
   }
 
