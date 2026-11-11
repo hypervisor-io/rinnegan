@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import Database from "better-sqlite3";
 import { GraphStore } from "./store.js";
 
 describe("GraphStore", () => {
@@ -109,5 +113,35 @@ describe("GraphStore", () => {
     const s = GraphStore.open(":memory:");
     expect(s.fingerprint()).toBe(createHash("sha256").update("").digest("hex"));
     s.close();
+  });
+});
+
+describe("GraphStore semantic cache", () => {
+  it("stores one payload per corpus key and never serves a different key", () => {
+    const g = GraphStore.open(":memory:");
+    expect(g.readSemanticCache("k1")).toBeUndefined(); // empty table
+    expect(g.writeSemanticCache("k1", Buffer.from("payload"))).toBe(true);
+    expect(g.readSemanticCache("k1")?.toString()).toBe("payload");
+    expect(g.readSemanticCache("k2")).toBeUndefined(); // stale key ≠ whatever is stored
+    g.deleteSemanticCache();
+    expect(g.readSemanticCache("k1")).toBeUndefined();
+    g.close();
+  });
+
+  it("tolerates a DB that predates the cache table and refuses to write read-only", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-store-"));
+    const dbPath = join(dir, "graph.db");
+    new Database(dbPath).close(); // bare SQLite file: no schema at all, let alone semantic_cache
+
+    const ro = GraphStore.open(dbPath, { readonly: true });
+    expect(ro.isReadOnly()).toBe(true);
+    expect(ro.readSemanticCache("k")).toBeUndefined(); // missing table is a miss, not a throw
+    expect(ro.writeSemanticCache("k", Buffer.from("payload"))).toBe(false);
+    ro.close();
+
+    const rw = GraphStore.open(dbPath);
+    expect(rw.readSemanticCache("k")).toBeUndefined(); // nothing was written
+    rw.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 });

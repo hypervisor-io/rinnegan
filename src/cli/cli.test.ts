@@ -4,6 +4,8 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { runCli } from "./main.js";
+import { GraphStore } from "../graph/store.js";
+import { semanticCacheKey } from "../semantic/engine.js";
 
 const fixtureDirs: string[] = [];
 
@@ -96,6 +98,22 @@ describe("CLI", () => {
     const lines: string[] = [];
     await runCli(["--json", "status"], (s) => lines.push(s), root);
     expect(() => JSON.parse(lines.join(""))).not.toThrow();
+  });
+
+  it("index and status never build or persist the semantic model; the first understand does", async () => {
+    const dir = fixture({ "src/a.ts": "export function chargePayment() { return 1; }" });
+    const dbPath = join(dir, ".rinnegan", "graph.db");
+
+    await runCli(["index"], () => {}, dir);
+    await runCli(["status"], () => {}, dir);
+    let store = GraphStore.open(dbPath);
+    expect(store.readSemanticCache(semanticCacheKey(store))).toBeUndefined();
+    store.close();
+
+    await runCli(["understand", "chargePayment"], () => {}, dir);
+    store = GraphStore.open(dbPath);
+    expect(store.readSemanticCache(semanticCacheKey(store))).toBeInstanceOf(Buffer);
+    store.close();
   });
 
   it("inventory --json emits one parseable JSON object per line; plain mode marks orphaned files", async () => {

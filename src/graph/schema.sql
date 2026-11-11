@@ -50,3 +50,13 @@ CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file);
 -- FTS5 over pre-tokenized text (camelCase/snake already split into words),
 -- so BM25 ranking sees identifier sub-tokens. `id` is carried UNINDEXED.
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id UNINDEXED, tokens);
+
+-- Single-row cache for the semantic (LSA) model, which costs minutes to build on
+-- a large corpus. `fingerprint` is the corpus identity (node count + the same
+-- hash `rinnegan status` prints); a mismatch is a cache miss, never a stale hit.
+-- The payload is a versioned deterministic binary blob — see semantic/cache.ts.
+CREATE TABLE IF NOT EXISTS semantic_cache (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  fingerprint TEXT NOT NULL,
+  payload     BLOB NOT NULL
+);

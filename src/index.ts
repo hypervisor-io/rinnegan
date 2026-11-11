@@ -90,7 +90,8 @@ export class Rinnegan {
   }
 
   private sem(): SemanticEngine {
-    if (!this.semantic) this.semantic = SemanticEngine.build(this.store);
+    // Load the persisted model when the corpus is unchanged; build + save otherwise.
+    if (!this.semantic) this.semantic = SemanticEngine.load(this.store);
     return this.semantic;
   }
 

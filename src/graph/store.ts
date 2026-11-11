@@ -10,6 +10,16 @@ import { resolveModulePath } from "../resolution/module_path.js";
 
 const SCHEMA = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
 
+/**
+ * Created on first cache use as well as by the schema, so a DB written by an
+ * older rinnegan grows the table lazily instead of failing to cache.
+ */
+const CACHE_SCHEMA = `CREATE TABLE IF NOT EXISTS semantic_cache (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  fingerprint TEXT NOT NULL,
+  payload     BLOB NOT NULL
+)`;
+
 export interface FileMeta {
   hash: string;
   mtimeMs: number;
@@ -17,6 +27,11 @@ export interface FileMeta {
   role: string;
   /** ANALYZER_VERSION that produced this file's nodes/edges — see parse/extract.ts. */
   analyzerVersion: number;
+}
+
+export interface OpenOpts {
+  /** Open an existing DB without write access — queries work, caches are not written. */
+  readonly?: boolean;
 }
 
 /** Lowercase tokens from an identifier-ish string: camelCase + snake + dots split. */
@@ -49,9 +64,13 @@ export class GraphStore {
   private db: Database.Database;
   private stmtCache = new Map<string, Database.Statement>();
 
-  private constructor(dbPath: string) {
-    if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
+  private constructor(dbPath: string, opts: OpenOpts = {}) {
+    const readonly = !!opts.readonly;
+    if (dbPath !== ":memory:" && !readonly) mkdirSync(dirname(dbPath), { recursive: true });
+    this.db = readonly ? new Database(dbPath, { readonly: true, fileMustExist: true }) : new Database(dbPath);
+    // A read-only connection must not attempt any DDL: schema + migrations are
+    // skipped, and readers tolerate a DB that predates a table (cache misses).
+    if (readonly) return;
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("synchronous = NORMAL");
     this.db.exec(SCHEMA);
@@ -73,8 +92,50 @@ export class GraphStore {
     return s;
   }
 
-  static open(dbPath: string): GraphStore {
-    return new GraphStore(dbPath);
+  static open(dbPath: string, opts: OpenOpts = {}): GraphStore {
+    return new GraphStore(dbPath, opts);
+  }
+
+  /** True when opened without write access (queries work; caches are not written). */
+  isReadOnly(): boolean {
+    return this.db.readonly;
+  }
+
+  /**
+   * Read the persisted semantic model for this exact corpus key, or `undefined`
+   * on any miss: no row, a different key, a DB that predates the table, or a
+   * payload the caller rejects. Never a partial or stale model.
+   */
+  readSemanticCache(key: string): Buffer | undefined {
+    try {
+      const row = this.stmt(`SELECT fingerprint, payload FROM semantic_cache WHERE id = 1`).get() as
+        | { fingerprint: string; payload: Buffer }
+        | undefined;
+      if (!row || row.fingerprint !== key) return undefined;
+      return row.payload;
+    } catch {
+      return undefined; // no semantic_cache table (pre-cache DB) or unreadable row
+    }
+  }
+
+  /** Persist the semantic model. Best effort: a read-only DB/file just skips it. */
+  writeSemanticCache(key: string, payload: Buffer): boolean {
+    if (this.db.readonly) return false;
+    try {
+      this.db.exec(CACHE_SCHEMA);
+      this.stmt(`INSERT OR REPLACE INTO semantic_cache (id, fingerprint, payload) VALUES (1, ?, ?)`).run(key, payload);
+      return true;
+    } catch {
+      return false; // e.g. a read-only filesystem — the cache is an optimization, never a failure
+    }
+  }
+
+  deleteSemanticCache(): void {
+    try {
+      this.stmt(`DELETE FROM semantic_cache WHERE id = 1`).run();
+    } catch {
+      // table absent — nothing to drop
+    }
   }
 
   private rowToNode(r: NodeRow): GraphNode {

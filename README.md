@@ -151,6 +151,26 @@ node bin/rinnegan.js status --json | jq .fingerprint
 No S3 or git-backed store for the index — it's a single SQLite file, so `actions/cache`
 (or a plain `cp`) is the whole sharing story.
 
+### The semantic model is cached in the same file
+
+`understand` ranks seeds with a deterministic LSA (TF-IDF + truncated SVD) + BM25
+model. The SVD is the only expensive step in the pipeline — minutes on a large corpus
+— so it must not run once per process. `index` stays semantic-free and fast; the first
+`understand` after an index change builds the model and persists it in
+`graph.db`'s `semantic_cache` row, and every later process loads it instead:
+
+| corpus | `understand`, first run (build + save) | later runs (load) |
+| --- | --- | --- |
+| 229k nodes | 478 s | 2.5 s |
+| 22k nodes | 21 s | 1.3 s |
+
+The cache key is the corpus fingerprint (the same value `status` prints) plus the
+node count, so any index mutation invalidates it — a stale model is never served. The
+payload is a versioned, little-endian binary blob (bump `SEMANTIC_CACHE_VERSION` in
+`src/semantic/cache.ts` to invalidate every existing row), and loading it reproduces
+the built model bit for bit, so answers are identical either way. On a read-only
+`graph.db` queries still work; they just rebuild instead of caching.
+
 ## Pre-commit gate
 
 ```bash

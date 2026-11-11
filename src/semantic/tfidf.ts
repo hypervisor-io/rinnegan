@@ -48,8 +48,12 @@ export function buildTfidf(docsTokens: string[][], maxVocab = 2000): Tfidf {
   return { vocab, termIndex, idf, sparse: { rows: vocab.length, cols: N, colData } };
 }
 
-/** Project a query's tokens into the TF-IDF term space (a terms-length vector). */
-export function queryVector(tf: Tfidf, tokens: string[]): number[] {
+/**
+ * Project a query's tokens into the TF-IDF term space (a terms-length vector).
+ * Takes only the query-time half of a `Tfidf` so a deserialized cache entry —
+ * which carries no sparse matrix — can be queried directly.
+ */
+export function queryVector(tf: Pick<Tfidf, "vocab" | "termIndex" | "idf">, tokens: string[]): number[] {
   const v = new Array<number>(tf.vocab.length).fill(0);
   const counts = new Map<number, number>();
   for (const t of tokens) {
