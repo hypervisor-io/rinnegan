@@ -48,7 +48,7 @@ const FILES = {
 async function buildStore(files: Record<string, string> = FILES): Promise<GraphStore> {
   const root = fixture(files);
   const store = GraphStore.open(":memory:");
-  await new Indexer(store).indexAll(root);
+  await new Indexer(store).indexAll(root, { jobs: 1 });
   return store;
 }
 

@@ -15,7 +15,9 @@ for, it perceives every path: the whole symbol graph, every edge, and the blast 
 change — while marking exactly which facts are ground truth.
 
 - **Deterministic.** No neural embeddings, no AI tokenization, no external API. Same
-  corpus ⇒ byte-identical index and output.
+  corpus ⇒ byte-identical index and output — `index` parses files on a bounded worker
+  pool but commits them in sorted file order, so neither `--jobs` nor parse-completion
+  order can change a single row.
 - **Semantic discovery without a model.** Classical latent-semantic analysis (TF-IDF +
   truncated SVD) — find code by meaning, fully local and reproducible.
 - **Provenance on every fact.** Each graph edge is tagged `ast_exact | ast_inferred |
@@ -37,7 +39,7 @@ git clone https://github.com/hypervisor-io/rinnegan.git
 cd rinnegan
 npm install        # better-sqlite3 ships a prebuilt binary (Node 22+)
 npm run build
-node bin/rinnegan.js index            # build the SQLite knowledge graph
+node bin/rinnegan.js index [--jobs N] # build the SQLite knowledge graph (N parse workers, default cores-1; 1 = serial)
 node bin/rinnegan.js understand "how does X work"   # minimal provenance-tagged slice
 node bin/rinnegan.js mcp              # MCP server (understand, lookup, verify, map)
 ```

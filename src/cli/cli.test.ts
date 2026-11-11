@@ -44,6 +44,20 @@ describe("CLI", () => {
     expect(lines.join("\n").toLowerCase()).toContain("login");
   });
 
+  it("index --jobs selects the worker count and rejects a bad value", async () => {
+    const dir = fixture({ "a.ts": "export function one() {}", "b.ts": "export function two() {}" });
+    const lines: string[] = [];
+    await runCli(["index", "--jobs", "1"], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toMatch(/Indexed 2 file\(s\)/);
+
+    // same tree again through the parallel path: everything is already fresh
+    lines.length = 0;
+    await runCli(["index", "-j", "3"], (s) => lines.push(s), dir);
+    expect(lines.join("\n")).toMatch(/Indexed 0 file\(s\).*\(2 unchanged\)/);
+
+    await expect(runCli(["index", "--jobs", "0"], () => {}, dir)).rejects.toThrow(/positive integer/);
+  });
+
   it("callers command works", async () => {
     const lines: string[] = [];
     await runCli(["callers", "validate"], (s) => lines.push(s), root);

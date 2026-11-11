@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import Database from "better-sqlite3";
 import { GraphStore } from "../graph/store.js";
-import { Indexer } from "./indexer.js";
+import { Indexer, defaultJobs, resolveJobs } from "./indexer.js";
+import type { GraphEdge, GraphNode } from "../core/types.js";
 
 let root: string;
 const fixtureDirs: string[] = [];
@@ -30,10 +31,45 @@ afterEach(() => {
   for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+/** One file per parse backend, so a parallel run exercises TS/JS AST, tree-sitter and cross-file imports. */
+const POLYGLOT: Record<string, string> = {
+  "package.json": JSON.stringify({ name: "poly", main: "./src/index.ts" }),
+  "src/index.ts": `import { login } from "./auth.js";\nexport function main() { return login("u") }`,
+  "src/auth.ts": `export function login(user: string) { return validate(user) }\nfunction validate(u: string) { return u.length > 0 }`,
+  "src/legacy.js": `const { helper } = require("./helper");\nfunction run() { return helper() }\nmodule.exports = { run };`,
+  "src/helper.js": `function helper() { return 1 }\nmodule.exports = { helper };`,
+  "tools/build.py": `def build(target):\n    return compile_target(target)\n\ndef compile_target(t):\n    return t\n`,
+  "scripts/deploy.sh": `#!/usr/bin/env bash\ndeploy() {\n  push_image\n}\npush_image() {\n  echo hi\n}\ndeploy\n`,
+  "native/core.rs": `fn helper() -> u32 { 1 }\n\npub fn run() -> u32 { helper() }\n`,
+};
+
+/**
+ * Full observable index state in a canonical order: two runs that claim to be
+ * deterministic must match on every record, not just on counts.
+ */
+function snapshot(store: GraphStore) {
+  const byId = (a: GraphNode, b: GraphNode) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  const byEdge = (a: GraphEdge, b: GraphEdge) =>
+    [a.source, a.target, a.kind, String(a.line).padStart(9, "0"), String(a.col).padStart(9, "0")].join("\0") <
+    [b.source, b.target, b.kind, String(b.line).padStart(9, "0"), String(b.col).padStart(9, "0")].join("\0")
+      ? -1
+      : 1;
+  const files = store.allFilePaths();
+  return {
+    nodes: [...store.allNodes()].sort(byId),
+    edges: [...store.allEdges()].sort(byEdge),
+    files,
+    metas: files.map((f) => [f, store.getFileMeta(f)] as const),
+    imports: files.map((f) => [f, store.getImports(f)] as const),
+    roles: [...store.roleByFile()],
+    fingerprint: store.fingerprint(),
+  };
+}
+
 describe("Indexer", () => {
   it("indexes files into the graph", async () => {
     const store = GraphStore.open(":memory:");
-    const stats = await new Indexer(store).indexAll(root);
+    const stats = await new Indexer(store).indexAll(root, { jobs: 1 });
     expect(stats.scanned).toBe(2);
     expect(stats.parsed).toBe(2);
     expect(stats.nodes).toBeGreaterThan(0);
@@ -45,11 +81,11 @@ describe("Indexer", () => {
   it("two-gate incremental: re-run with no changes does zero reparse", async () => {
     const dbPath = join(root, ".rinnegan", "graph.db");
     const s1 = GraphStore.open(dbPath);
-    await new Indexer(s1).indexAll(root);
+    await new Indexer(s1).indexAll(root, { jobs: 1 });
     s1.close();
 
     const s2 = GraphStore.open(dbPath);
-    const stats = await new Indexer(s2).indexAll(root);
+    const stats = await new Indexer(s2).indexAll(root, { jobs: 1 });
     expect(stats.parsed).toBe(0);
     expect(stats.skipped).toBe(stats.scanned);
     s2.close();
@@ -59,7 +95,7 @@ describe("Indexer", () => {
     const root = fixture({ "a.ts": "export function one() {}" });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
     writeFileSync(join(root, "a.ts"), "export function two() {}");
     const t = Date.now() + 5000;
     utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
@@ -73,7 +109,7 @@ describe("Indexer", () => {
     const root = fixture({ "a.ts": "export function one() {}", "b.ts": "export function keep() {}" });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
     rmSync(join(root, "a.ts"));
     expect(await ix.sync(root)).toEqual({ reindexed: 0, removed: 1 });
     expect(store.allFilePaths()).toEqual(["b.ts"]);
@@ -88,7 +124,7 @@ describe("Indexer", () => {
     });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
 
     const callerFiles = (name: string) => {
       const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
@@ -117,7 +153,7 @@ describe("Indexer", () => {
     });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
 
     writeFileSync(join(root, "a.ts"), "function fn() { return 2 }"); // no longer exported
     const t = Date.now() + 5000;
@@ -140,7 +176,7 @@ describe("Indexer", () => {
     });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
 
     const callerFiles = (name: string) => {
       const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
@@ -171,7 +207,7 @@ describe("Indexer", () => {
     });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
 
     const callerFiles = (name: string) => {
       const target = store.allNodes().find((n) => n.qualifiedName === name && n.isExported);
@@ -197,7 +233,7 @@ describe("Indexer", () => {
     const root = fixture({ "a.ts": "export function one() {}" });
     const store = GraphStore.open(":memory:");
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
 
     // Simulate the file having been indexed by an OLDER analyzer: identical
     // content and mtime, only the analyzer version is stale. A pure
@@ -217,7 +253,7 @@ describe("Indexer", () => {
     const dbPath = join(root, ".rinnegan", "graph.db");
     const store = GraphStore.open(dbPath);
     const ix = new Indexer(store);
-    await ix.indexAll(root);
+    await ix.indexAll(root, { jobs: 1 });
     expect(store.fileRelevance("turn").get("a.ts")).toBe(1);
 
     // Unchanged bytes ⇒ no reparse; the row is replaced, never duplicated.
@@ -236,12 +272,88 @@ describe("Indexer", () => {
       "src/util.test.ts": "import { u } from './util.js'; u();",
     });
     const store = GraphStore.open(":memory:");
-    await new Indexer(store).indexAll(root);
+    await new Indexer(store).indexAll(root, { jobs: 1 });
     const roles = store.roleByFile();
     expect(roles.get("src/index.ts")).toBe("entrypoint");
     expect(roles.get("src/util.ts")).toBe("library");
     expect(roles.get("src/util.test.ts")).toBe("test");
     expect(roles.get("package.json")).toBe("config");
+    store.close();
+  });
+});
+
+describe("Indexer parallel parsing", () => {
+  it("resolveJobs clamps to a usable worker count and keeps the serial fast path", () => {
+    expect(resolveJobs(1)).toBe(1);
+    expect(resolveJobs(0)).toBe(1);
+    expect(resolveJobs(-4)).toBe(1);
+    expect(resolveJobs(2.9)).toBe(2);
+    expect(resolveJobs(Number.NaN)).toBe(defaultJobs());
+    const d = defaultJobs();
+    expect(d).toBeGreaterThanOrEqual(1);
+    expect(d).toBeLessThanOrEqual(8);
+    expect(resolveJobs()).toBe(d);
+  });
+
+  it("jobs=1 and jobs=3 produce the exact same graph on a polyglot tree", async () => {
+    const root = fixture(POLYGLOT);
+
+    const serial = GraphStore.open(":memory:");
+    const serialStats = await new Indexer(serial).indexAll(root, { jobs: 1 });
+    const parallel = GraphStore.open(":memory:");
+    const parallelStats = await new Indexer(parallel).indexAll(root, { jobs: 3 });
+
+    expect(serialStats.scanned).toBe(Object.keys(POLYGLOT).length);
+    expect(serialStats.parsed).toBe(serialStats.scanned);
+    expect(parallelStats).toEqual(serialStats);
+
+    // Every record, not just the counts: nodes, edges, file metas, imports, roles, fingerprint.
+    expect(snapshot(parallel)).toEqual(snapshot(serial));
+
+    // The fixture really did exercise every parse backend.
+    const languages = new Set(serial.allNodes().map((n) => n.language));
+    for (const lang of ["typescript", "javascript", "python", "bash", "rust"]) {
+      expect(languages.has(lang)).toBe(true);
+    }
+    serial.close();
+    parallel.close();
+  });
+
+  it("repeated parallel runs are identical, and the gates still skip an unchanged tree", async () => {
+    const root = fixture(POLYGLOT);
+    const first = GraphStore.open(":memory:");
+    await new Indexer(first).indexAll(root, { jobs: 3 });
+    const second = GraphStore.open(":memory:");
+    await new Indexer(second).indexAll(root, { jobs: 3 });
+    expect(snapshot(second)).toEqual(snapshot(first));
+
+    // Incremental gate 1/2 run before any task is dispatched, so a warm re-index
+    // parses nothing at all — in the parallel path too.
+    const again = await new Indexer(second).indexAll(root, { jobs: 3 });
+    expect(again.parsed).toBe(0);
+    expect(again.skipped).toBe(again.scanned);
+    expect(snapshot(second).fingerprint).toBe(snapshot(first).fingerprint);
+    first.close();
+    second.close();
+  });
+
+  it("the default worker count still matches the serial graph", async () => {
+    const root = fixture(POLYGLOT);
+    const store = GraphStore.open(":memory:");
+    const stats = await new Indexer(store).indexAll(root);
+    const baseline = GraphStore.open(":memory:");
+    await new Indexer(baseline).indexAll(root, { jobs: 1 });
+    expect(snapshot(store)).toEqual(snapshot(baseline));
+    expect(stats.parsed).toBe(stats.scanned);
+    store.close();
+    baseline.close();
+  });
+
+  it("an empty tree indexes cleanly with parallel jobs", async () => {
+    const empty = fixture({});
+    const store = GraphStore.open(":memory:");
+    const stats = await new Indexer(store).indexAll(empty, { jobs: 3 });
+    expect(stats).toEqual({ scanned: 0, parsed: 0, skipped: 0, nodes: 0, edges: 0 });
     store.close();
   });
 });

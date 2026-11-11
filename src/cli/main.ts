@@ -16,6 +16,14 @@ function openIndexed(root: string): Rinnegan {
   return Rinnegan.open(root);
 }
 
+/** `--jobs` worker count: omitted keeps the default; anything else must be a positive integer. */
+function parseJobs(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error(`--jobs must be a positive integer (got '${raw}')`);
+  return n;
+}
+
 /** Build VerifyInput[] straight from the git index: paths + addedRanges from
  * `git diff --cached`, post-images from `git show :<path>` (fails for a
  * staged deletion — that's the null postImage the report expects). */
@@ -63,9 +71,10 @@ export function buildProgram(out: Out, cwd: string): Command {
   program
     .command("index [path]")
     .description("Build/update the index")
-    .action(async (path?: string) => {
+    .option("-j, --jobs <n>", "parallel parse workers (1 = serial; default: cores - 1, max 8)")
+    .action(async (path: string | undefined, opts: { jobs?: string }) => {
       const vx = Rinnegan.open(path ?? dir());
-      const stats = await vx.indexAll();
+      const stats = await vx.indexAll({ jobs: parseJobs(opts.jobs) });
       out(json() ? JSON.stringify(stats) : `Indexed ${stats.parsed} file(s), ${stats.nodes} nodes, ${stats.edges} edges (${stats.skipped} unchanged).`);
       vx.close();
     });

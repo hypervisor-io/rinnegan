@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { GraphStore } from "./graph/store.js";
-import { Indexer, type IndexStats, type SyncStats } from "./index/indexer.js";
+import { Indexer, type IndexOpts, type IndexStats, type SyncStats } from "./index/indexer.js";
 import { SemanticEngine } from "./semantic/engine.js";
 import { Watcher, type WatchEvent } from "./watch/watcher.js";
 import { understand, type UnderstandOpts, type UnderstandResult } from "./signal/understand.js";
@@ -14,7 +14,7 @@ import type { GraphNode, GraphEdge, ReadWrite } from "./core/types.js";
 
 export { VERSION } from "./version.js";
 export type { GraphNode, GraphEdge, Provenance, ReadWrite, NodeKind, EdgeKind } from "./core/types.js";
-export type { IndexStats } from "./index/indexer.js";
+export type { IndexOpts, IndexStats } from "./index/indexer.js";
 export { type SyncStats } from "./index/indexer.js";
 export type { UnderstandResult } from "./signal/understand.js";
 export type { VerifyReport, VerifyInput, Finding, FindingRule } from "./verify/verify.js";
@@ -82,8 +82,9 @@ export class Rinnegan {
     return new Rinnegan(root, GraphStore.open(dbPath));
   }
 
-  async indexAll(): Promise<IndexStats> {
-    const stats = await new Indexer(this.store).indexAll(this.root);
+  /** Build/refresh the whole index. `jobs` opts into parallel parsing (1 = serial). */
+  async indexAll(opts: IndexOpts = {}): Promise<IndexStats> {
+    const stats = await new Indexer(this.store).indexAll(this.root, opts);
     // semantic (LSA) is built lazily on first understand/seed — keeps `index` fast
     this.semantic = null;
     return stats;

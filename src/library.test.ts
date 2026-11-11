@@ -37,7 +37,7 @@ describe("Rinnegan library", () => {
       ].join("\n"),
     );
     vx = Rinnegan.open(root, { dbPath: ":memory:" });
-    await vx.indexAll();
+    await vx.indexAll({ jobs: 1 });
   });
   afterAll(() => {
     vx.close();
@@ -68,7 +68,7 @@ describe("Rinnegan library", () => {
       ].join("\n"),
     });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     const callers = vx2.callers("charge");
     vx2.close();
     expect(callers.map((n) => n.qualifiedName)).toEqual(["run"]);
@@ -96,7 +96,7 @@ describe("Rinnegan library", () => {
     // is a pre-existing FTS recall-over-precision quirk, out of scope for this task.
     const root = fixture({ "a.ts": "export function alpha() {}" });
     const vx = Rinnegan.open(root, { dbPath: ":memory:" });
-    await vx.indexAll();
+    await vx.indexAll({ jobs: 1 });
     writeFileSync(join(root, "a.ts"), "export function beta() {}");
     const t = Date.now() + 5000;
     utimesSync(join(root, "a.ts"), new Date(t), new Date(t));
@@ -147,7 +147,7 @@ describe("Rinnegan library", () => {
       ].join("\n"),
     });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    return vx2.indexAll().then(() => {
+    return vx2.indexAll({ jobs: 1 }).then(() => {
       const r = vx2.lookup("target");
       vx2.close();
       expect(r.found).toBe(true);
@@ -165,7 +165,7 @@ describe("Rinnegan library", () => {
       "unused.ts": `export function idleC() { return 2; }`,
     });
     const vx2 = Rinnegan.open(root, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     const rows = vx2.inventory();
     vx2.close();
 
@@ -189,7 +189,7 @@ describe("Rinnegan library", () => {
       "docs/x.md": "Use `realFn` and `goneFn` for tasks.",
     });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     const stale = vx2.staleDocs();
     vx2.close();
     expect(stale).toEqual([{ docPath: "docs/x.md", line: 1, name: "goneFn" }]);
@@ -201,7 +201,7 @@ describe("Rinnegan library", () => {
       "src/pay.test.ts": ["import { charge } from \"./pay\";", "charge();"].join("\n"),
     });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     const tests = vx2.testsFor("charge");
     vx2.close();
     expect(tests.map((n) => n.filePath)).toEqual(["src/pay.test.ts"]);
@@ -210,7 +210,7 @@ describe("Rinnegan library", () => {
   it("testsFor returns [] when the symbol doesn't resolve", async () => {
     const root2 = fixture({ "src/pay.ts": "export function charge() { return 1; }" });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     expect(vx2.testsFor("zzzNoSuchSymbolAnywhere")).toEqual([]);
     vx2.close();
   });
@@ -221,7 +221,7 @@ describe("Rinnegan library", () => {
       "src/b.ts": ['import { fn } from "./a.js";', "export function callFn() { fn(); }"].join("\n"),
     });
     const vx2 = Rinnegan.open(root2, { dbPath: ":memory:" });
-    await vx2.indexAll();
+    await vx2.indexAll({ jobs: 1 });
     const callers = vx2.callers("fn");
     vx2.close();
     expect(callers.map((n) => n.qualifiedName)).toEqual(["callFn"]);
