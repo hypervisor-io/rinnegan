@@ -206,6 +206,39 @@ definitions are reseated as one **same-file coherence** block (top 5 by rank, th
 source order), and DETAIL renders at most five facts per file so one long file
 cannot spend the whole specificity budget.
 
+### Symbol-body prior (choosing *inside* a file)
+
+The file prior can only say *which file* is about the task. Inside it every symbol
+still looks alike, so `scrape/manager.go` hands its DETAIL slots to the ten
+`Targets*` accessors — names that repeat the query word — while `reload` /
+`updateTsets` (the code that actually collects targets) never appear.
+
+`understand` therefore scores each candidate's **own source body**
+(`startLine..endLine`, `bodyRelevance` in `src/signal/body.ts`) with the same
+deterministic BM25 and the same tokenizer recipe as the file prior — name,
+signature, docstring and body, morphologically expanded — over the candidates
+already in the pool (spine + the six prior files), normalized so the best body is
+1, and multiplies rank by `1 + 2·score` again. One read per candidate file (the
+renderers' cache), never a corpus-wide scan.
+
+Three deterministic limits keep it honest:
+
+- **32 kB body cap** (`BODY_CHAR_CAP`, ≈8k tokens): a generated 6k-line method
+  cannot dominate a query's cost, and truncation at a fixed character count keeps
+  the score byte-identical run to run.
+- **200-line span cap** (`BODY_SPAN_LINES`): a 400-line `main()` or a 600-line
+  evaluator mentions every query word somewhere; promoting it spends the one
+  boost on a fact too big for DETAIL, and a `module` that wraps a whole file just
+  applies the file prior twice. Past that size the body is a file section.
+- **Definition kinds only** — a `variable`'s body is an initializer — and no body
+  boost for test/doc files unless the task mentions tests.
+
+A missing or unreadable file simply has no body: the prior is a no-op, never an
+error. Measured on the five-corpus eval, the body prior is what puts
+`execInstantEval`, `runInstantQuery`, `NewInstantQuery` and `execEvalStmt` next to
+`eval` for "how does PromQL evaluate an instant query", and it costs ~0.3–0.45 s
+per query on a warm index (pool-bounded, not corpus-bounded).
+
 **Upgrading an existing index.** `files.fts_version` records the token recipe that
 produced each file's row. A database written before path tokens existed is
 migrated automatically on the next write open (the FTS table is recreated and every

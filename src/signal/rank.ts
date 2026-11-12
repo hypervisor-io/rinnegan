@@ -34,6 +34,16 @@ export interface RankOpts {
    * Omitted ⇒ no prior, the pre-prior math exactly.
    */
   fileRelevance?: Map<string, number>;
+  /**
+   * nodeId → 0..1 relevance of the symbol's OWN source body (`bodyRelevance`).
+   * The file prior can only pick the file; this picks the symbol inside it, so a
+   * method whose body does the work outranks a same-file accessor whose name
+   * merely repeats the query (measured: promql/engine.go's `eval` pipeline rises
+   * over the lexical twins around it). Same shape as the file prior: up to 3×
+   * the score for a body that speaks the task.
+   * Omitted ⇒ no body prior, the file-prior math exactly.
+   */
+  bodyRelevance?: Map<string, number>;
 }
 
 export interface Ranked {
@@ -87,7 +97,10 @@ export function rankNodes(
       (1 + rel * 3) * (1 + Math.log(1 + centrality)) * (0.4 + 0.6 * trust) * kindW * roleW *
       // File-body prior: a symbol living in a file whose text is about the task
       // is the better bet than a lexical twin in an unrelated file.
-      (1 + 2 * (opts?.fileRelevance?.get(node.filePath) ?? 0));
+      (1 + 2 * (opts?.fileRelevance?.get(node.filePath) ?? 0)) *
+      // Symbol-body prior: within that file, the body that does the work wins
+      // over a same-file accessor whose name merely repeats the query.
+      (1 + 2 * (opts?.bodyRelevance?.get(node.id) ?? 0));
     out.push({ node, score, relevance: rel, centrality, trust });
   }
 

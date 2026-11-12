@@ -6,6 +6,7 @@ import type { GraphNode } from "../core/types.js";
 import { SemanticEngine } from "../semantic/engine.js";
 import { extractSpine } from "./spine.js";
 import { rankNodes, type Ranked } from "./rank.js";
+import { bodyRelevance } from "./body.js";
 import { estimateTokens, positionOrder } from "./budget.js";
 import { renderFact, type RenderedFact } from "./render.js";
 import { buildHarmonic, type Balance } from "./harmonic.js";
@@ -269,17 +270,9 @@ export function understand(
     const floor = exactAnchors.has(id) ? 1 : 0.7;
     relevance.set(id, Math.max(relevance.get(id) ?? 0, floor));
   }
-  const rankedAll = rankNodes(store, pool, relevance, {
-    roles, testIntent, seedIds: new Set(anchors), fileRelevance,
-  });
-  const nonTest = rankedAll.filter((r) => !isTestFile(r.node));
-  const scored = !testIntent && nonTest.length > 0 ? nonTest : rankedAll;
-  // Give the strongest prior files one coherent block of their own definitions,
-  // so a file's entry symbol is not starved by its tied siblings.
-  const ranked = testIntent
-    ? scored
-    : sameFileCoherence(scored, priorFiles.slice(0, COHERENCE_FILES), DEF_ANCHOR_KINDS);
 
+  // One read per candidate file, shared with the renderers below. Declared
+  // here because the body prior must read bodies BEFORE ranking.
   const fileCache = new Map<string, string | undefined>();
   const readSource = (path: string): string | undefined => {
     if (fileCache.has(path)) return fileCache.get(path);
@@ -292,6 +285,32 @@ export function understand(
     fileCache.set(path, src);
     return src;
   };
+
+  // Symbol-level body prior over the SAME bounded pool the ranker sees: the
+  // file prior only says which file matters, never which symbol inside it does.
+  // Definition kinds only (a variable's body is an initializer, not an answer),
+  // and no body boost for test/doc files unless the task is about tests.
+  const bodyCandidates: GraphNode[] = [];
+  for (const id of pool) {
+    const n = store.getNode(id);
+    if (!n || !DEF_ANCHOR_KINDS.has(n.kind)) continue;
+    const role = roles.get(n.filePath);
+    if (!testIntent && (role === "test" || role === "doc")) continue;
+    bodyCandidates.push(n);
+  }
+  const bodyRel = bodyRelevance(task, bodyCandidates, readSource);
+
+  const rankedAll = rankNodes(store, pool, relevance, {
+    roles, testIntent, seedIds: new Set(anchors), fileRelevance,
+    bodyRelevance: bodyRel.size > 0 ? bodyRel : undefined,
+  });
+  const nonTest = rankedAll.filter((r) => !isTestFile(r.node));
+  const scored = !testIntent && nonTest.length > 0 ? nonTest : rankedAll;
+  // Give the strongest prior files one coherent block of their own definitions,
+  // so a file's entry symbol is not starved by its tied siblings.
+  const ranked = testIntent
+    ? scored
+    : sameFileCoherence(scored, priorFiles.slice(0, COHERENCE_FILES), DEF_ANCHOR_KINDS);
 
   // Harmonic multi-resolution memory (default): MAP → SIGNATURES → DETAIL.
   if ((opts.resolution ?? "harmonic") === "harmonic") {
