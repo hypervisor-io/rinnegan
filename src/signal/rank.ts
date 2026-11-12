@@ -44,6 +44,22 @@ export interface RankOpts {
    * Omitted ⇒ no body prior, the file-prior math exactly.
    */
   bodyRelevance?: Map<string, number>;
+  /**
+   * nodeId → 0..1 relevance of the best INDEXED BODY CHUNK the symbol overlaps
+   * (`windowRelevance`), read from `files_windows` — no file read at query time.
+   *
+   * Two jobs bodyRelevance cannot do: (1) it reaches symbols whose own body is
+   * skipped by the body caps (a >200-line method, or one past BODY_CHAR_CAP)
+   * yet whose neighbourhood is plainly about the task; (2) it is *positional*
+   * evidence — it says where in the file the task's vocabulary lives, which
+   * survives a symbol whose name and body are generic (`execEvalStmt`).
+   *
+   * Deliberately a UNIT multiply (`1 + score`), not the file/body priors' 3×:
+   * the chunk is evidence about the region, not about the symbol, and the same
+   * tokens already earned the file up to 3×. Two priors at 3× each would let one
+   * lexical neighbourhood outvote the graph. Omitted ⇒ exact pre-window math.
+   */
+  windowRelevance?: Map<string, number>;
 }
 
 export interface Ranked {
@@ -100,7 +116,10 @@ export function rankNodes(
       (1 + 2 * (opts?.fileRelevance?.get(node.filePath) ?? 0)) *
       // Symbol-body prior: within that file, the body that does the work wins
       // over a same-file accessor whose name merely repeats the query.
-      (1 + 2 * (opts?.bodyRelevance?.get(node.id) ?? 0));
+      (1 + 2 * (opts?.bodyRelevance?.get(node.id) ?? 0)) *
+      // Window prior: the indexed chunk this symbol overlaps. Unit weight — see
+      // RankOpts.windowRelevance for why it is not another 3×.
+      (1 + (opts?.windowRelevance?.get(node.id) ?? 0));
     out.push({ node, score, relevance: rel, centrality, trust });
   }
 

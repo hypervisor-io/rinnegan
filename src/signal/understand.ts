@@ -7,6 +7,7 @@ import { SemanticEngine } from "../semantic/engine.js";
 import { extractSpine } from "./spine.js";
 import { rankNodes, type Ranked } from "./rank.js";
 import { bodyRelevance } from "./body.js";
+import { windowRelevance } from "./window.js";
 import { estimateTokens, positionOrder } from "./budget.js";
 import { renderFact, type RenderedFact } from "./render.js";
 import { buildHarmonic, type Balance } from "./harmonic.js";
@@ -299,10 +300,15 @@ export function understand(
     bodyCandidates.push(n);
   }
   const bodyRel = bodyRelevance(task, bodyCandidates, readSource);
+  // Positional evidence over the SAME candidates, from the index (no reads): the
+  // chunk a symbol overlaps says where in the file the task's vocabulary lives,
+  // which is what separates a generic method from the accessors next to it.
+  const windowRel = windowRelevance(store, task, bodyCandidates);
 
   const rankedAll = rankNodes(store, pool, relevance, {
     roles, testIntent, seedIds: new Set(anchors), fileRelevance,
     bodyRelevance: bodyRel.size > 0 ? bodyRel : undefined,
+    windowRelevance: windowRel.size > 0 ? windowRel : undefined,
   });
   const nonTest = rankedAll.filter((r) => !isTestFile(r.node));
   const scored = !testIntent && nonTest.length > 0 ? nonTest : rankedAll;

@@ -6,7 +6,7 @@ import { Bm25Index } from "../semantic/bm25.js";
  * body is a one-line initializer (or nothing), so it carries no “how does this
  * work” signal — the file-level prior already covers it.
  */
-const BODY_KINDS = new Set<NodeKind>([
+export const BODY_KINDS = new Set<NodeKind>([
   "function", "method", "class", "interface", "struct", "type_alias", "enum", "module",
 ]);
 

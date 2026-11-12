@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { GraphStore } from "./store.js";
+import { GraphStore, WINDOW_MAX, bodyWindows, FILE_FTS_VERSION } from "./store.js";
 
 describe("GraphStore", () => {
   it("persists provenance + retrieves edges and fts", () => {
@@ -180,18 +180,43 @@ describe("GraphStore files_fts (path-aware file prior)", () => {
     g.close();
   });
 
-  it("caps a file at 4096 body tokens deterministically, in file order", () => {
-    const g = GraphStore.open(":memory:");
-    // Token 4097 onward is past the cap: "zzzlate" must be invisible.
-    const body = [...Array(4096).fill("filler"), "zzzlate"].join(" ");
+  it("keeps the 4096-token whole-file cap, and tiles windows past it deterministically", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-caps-"));
+    const dbPath = join(dir, "graph.db");
+    const g = GraphStore.open(dbPath);
+    // 512 lines × 8 tokens = the 4096-token cap, then "zzzlate" past it.
+    const body = [...Array(512).fill("filler filler filler filler filler filler filler filler"), "zzzlate"].join("\n");
     g.setFileTokens("big.ts", body);
     expect(g.fileRelevance("filler").get("big.ts")).toBe(1);
-    expect(g.fileRelevance("zzzlate")).toEqual(new Map());
 
-    // Same bytes twice ⇒ same prior (no accumulation, no drift).
+    const raw = new Database(dbPath, { readonly: true });
+    // The whole-file row is unchanged: still capped, so "zzzlate" is not in it …
+    expect(raw.prepare(`SELECT tokens LIKE '%zzzlate%' AS hit FROM files_fts WHERE file = 'big.ts'`).get())
+      .toEqual({ hit: 0 });
+    expect(raw.prepare(`SELECT count(*) c FROM files_fts WHERE file = 'big.ts'`).get()).toEqual({ c: 1 });
+    // … but the window rows cover the whole body, so the file prior sees it.
+    expect(g.fileRelevance("zzzlate").get("big.ts")).toBe(1);
+    const rows = () => raw.prepare(`SELECT start_line, end_line, token_count FROM files_windows WHERE file = 'big.ts'
+                                     ORDER BY start_line`).all();
+    const first = rows();
+    expect(first.length).toBeGreaterThan(1);
+    expect(first.length).toBeLessThanOrEqual(WINDOW_MAX);
+    // Tiling is contiguous: the first chunk starts at line 1, the last reaches EOF.
+    expect(first[0].start_line).toBe(1);
+    expect(first[first.length - 1].end_line).toBe(513);
+    for (let i = 1; i < first.length; i++) {
+      expect(first[i].start_line).toBe(first[i - 1].end_line + 1); // no gap, no overlap
+    }
+    raw.close();
+
+    // Same bytes twice ⇒ identical windows (no accumulation, no drift).
     g.setFileTokens("big.ts", body);
-    expect(g.fileRelevance("filler").get("big.ts")).toBe(1);
+    const reread = new Database(dbPath, { readonly: true });
+    expect(reread.prepare(`SELECT start_line, end_line, token_count FROM files_windows WHERE file = 'big.ts'
+                           ORDER BY start_line`).all()).toEqual(first);
+    reread.close();
     g.close();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it("replaces on re-index and deletes the row for an empty body", () => {
@@ -246,6 +271,116 @@ describe("GraphStore files_fts (path-aware file prior)", () => {
     g.setFileTokens("promql/engine.go", "eval");
     expect(g.fileRelevance("promql").get("promql/engine.go")).toBe(1);
     g.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("GraphStore body windows (best-chunk file prior)", () => {
+  /** A `lines`-line body of `perLine` filler tokens, dense chunk appended last. */
+  const bigBody = (lines: number, perLine: number, tail: string): string =>
+    [...Array(lines).fill(Array(perLine).fill("filler").join(" ")), tail].join("\n");
+
+  it("tiles a body into contiguous, bounded, deterministic windows", () => {
+    const content = bigBody(1200, 4, "epoll reactor epoll reactor");
+    const w = bodyWindows(content);
+    expect(w.length).toBeGreaterThan(1);
+    expect(w.length).toBeLessThanOrEqual(WINDOW_MAX);
+    expect(w[0].startLine).toBe(1);
+    expect(w[w.length - 1].endLine).toBe(1201); // full coverage, no trailing gap
+    for (let i = 1; i < w.length; i++) expect(w[i].startLine).toBe(w[i - 1].endLine + 1);
+    for (const x of w) expect(x.endLine).toBeGreaterThanOrEqual(x.startLine);
+    // Only the last window holds the tail, morphology-expanded like every other row.
+    expect(w[w.length - 1].tokens.filter((t) => t === "epoll").length).toBe(2);
+    expect([...w].map((x) => [x.startLine, x.endLine])).toEqual(bodyWindows(content).map((x) => [x.startLine, x.endLine]));
+    // Empty / token-less bodies carry no window.
+    expect(bodyWindows("")).toEqual([]);
+    expect(bodyWindows("\n\n   \n")).toEqual([]);
+  });
+
+  it("ranks a big file by the chunk that holds its evidence, not by its average", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-win-"));
+    const dbPath = join(dir, "graph.db");
+    const g = GraphStore.open(dbPath);
+    // 20k body tokens: the task's vocabulary appears ONLY past the whole-file
+    // 4096-token cap, and densely, in one chunk.
+    const big = bigBody(5000, 4, "the epoll reactor drives epoll resources with epoll readiness epoll reactor epoll");
+    g.setFileTokens("runtime/io/driver.rs", big);
+    g.setFileTokens("notes/helper.ts", "epoll"); // one word, no other evidence
+
+    // Combined prior = max(window, whole): the big file is present at all (the
+    // whole-file view cannot see it), and both views' best file keep their 1.
+    const combined = g.fileRelevance("epoll reactor");
+    expect(combined.get("runtime/io/driver.rs")).toBe(1);
+    expect(combined.get("notes/helper.ts")).toBe(1); // whole-file view's own best
+    g.close();
+
+    // Window view alone: the big file's best chunk is the best evidence there is.
+    const raw1 = new Database(dbPath);
+    raw1.exec(`DELETE FROM files_fts`);
+    raw1.close();
+    const windowOnly = GraphStore.open(dbPath, { readonly: true });
+    const win = windowOnly.fileRelevance("epoll reactor");
+    expect(win.get("runtime/io/driver.rs")).toBe(1);
+    expect(win.get("notes/helper.ts")!).toBeLessThan(1);
+    windowOnly.close();
+
+    // Whole-file view alone (no window rows): the previous formula, which
+    // provably cannot see the big file's evidence at all.
+    const g2 = GraphStore.open(dbPath);
+    g2.setFileTokens("runtime/io/driver.rs", big);
+    g2.setFileTokens("notes/helper.ts", "epoll");
+    g2.close();
+    const raw2 = new Database(dbPath);
+    raw2.exec(`DELETE FROM files_windows; DELETE FROM files_windows_fts`);
+    raw2.close();
+    const wholeOnly = GraphStore.open(dbPath, { readonly: true });
+    const whole = wholeOnly.fileRelevance("epoll reactor");
+    expect(whole.get("runtime/io/driver.rs")).toBeUndefined();
+    expect(whole.get("notes/helper.ts")).toBe(1);
+    expect(wholeOnly.windowScores("epoll", 10)).toEqual([]); // no windows ⇒ no window evidence
+    wholeOnly.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("prunes a file's windows by rowid on removeFile and never touches another file's", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-win-del-"));
+    const dbPath = join(dir, "graph.db");
+    const g = GraphStore.open(dbPath);
+    g.insertNode({ id: "n1", kind: "function", qualifiedName: "run", filePath: "a/big.ts", language: "ts", startLine: 1, endLine: 2 });
+    g.setFileMeta("a/big.ts", { hash: "h", mtimeMs: 1, nodeIds: ["n1"], role: "library", analyzerVersion: 1, ftsVersion: FILE_FTS_VERSION });
+    g.setFileTokens("a/big.ts", bigBody(1200, 4, "epoll reactor"));
+    g.setFileTokens("b/other.ts", "epoll reactor");
+    g.close();
+
+    const g2 = GraphStore.open(dbPath);
+    g2.removeFile("a/big.ts");
+    g2.close();
+
+    const raw = new Database(dbPath, { readonly: true });
+    expect(raw.prepare(`SELECT count(*) c FROM files_windows WHERE file = 'a/big.ts'`).get()).toEqual({ c: 0 });
+    expect(raw.prepare(`SELECT count(*) c FROM files_windows_fts WHERE file = 'a/big.ts'`).get()).toEqual({ c: 0 });
+    // No orphaned fts rows: every fts row still joins a live window row.
+    expect(raw.prepare(`SELECT count(*) c FROM files_windows_fts f
+                        LEFT JOIN files_windows w ON w.id = f.rowid WHERE w.id IS NULL`).get()).toEqual({ c: 0 });
+    expect(raw.prepare(`SELECT count(*) c FROM files_windows WHERE file = 'b/other.ts'`).get()).toEqual({ c: 1 });
+    raw.close();
+
+    const ro = GraphStore.open(dbPath, { readonly: true });
+    expect(ro.fileRelevance("epoll").get("b/other.ts")).toBe(1);
+    expect(ro.fileRelevance("epoll").has("a/big.ts")).toBe(false);
+    ro.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("never writes windows read-only, and tolerates a DB that predates them", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-win-ro-"));
+    const dbPath = join(dir, "graph.db");
+    new Database(dbPath).close(); // bare DB: no tables at all
+    const ro = GraphStore.open(dbPath, { readonly: true });
+    expect(() => ro.setFileTokens("a.ts", "epoll reactor")).not.toThrow();
+    expect(ro.windowScores("epoll", 10)).toEqual([]);
+    expect(ro.fileRelevance("epoll")).toEqual(new Map());
+    ro.close();
     rmSync(dir, { recursive: true, force: true });
   });
 });

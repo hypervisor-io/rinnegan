@@ -174,32 +174,55 @@ payload is a versioned, little-endian binary blob (bump `SEMANTIC_CACHE_VERSION`
 the built model bit for bit, so answers are identical either way. On a read-only
 `graph.db` queries still work; they just rebuild instead of caching.
 
-### Path-aware file prior + identifier morphology (retrieval)
+### Path-aware, best-window file prior + identifier morphology (retrieval)
 
 Symbol text alone is captured by lexically-loud files: a query about "driving IO
 with epoll" finds `benches/*.rs` and test helpers before `runtime/io/driver.rs`,
 because only symbol names are indexed. `index` therefore also writes each file's
-PATH and BODY tokens to `files_fts`:
+PATH and BODY tokens to `files_fts` and `files_windows`:
 
 - **path tokens** (`path_tokens`, weighted 6:1 over the body) — a path is a
   deliberate, low-noise statement of what a file is for (`promql/engine.go`,
   `action_dispatch/routing/route_set.rb`). Without them a short README that
   repeats the query's words outranks the file that implements the concept because
   BM25 length-normalizes long documents down.
-- **body tokens** (`tokens`, deterministic `basicTokens` in file order, capped at
-  4096 tokens per file).
+- **whole-file body tokens** (`files_fts.tokens`, deterministic `basicTokens` in
+  file order, capped at 4096 tokens per file) — one BM25 document per file.
+- **body windows** (`files_windows` + `files_windows_fts`): the same body tiled
+  into at most 16 contiguous chunks of ≥512 tokens (exactly 512 until a file gets
+  long enough to need bigger ones, never more rows than that), each carrying
+  absolute `start_line`/`end_line`. Every window is its own BM25 document, with
+  the file's path tokens repeated in its `path_tokens` column.
 - **identifier morphology** on both sides: a small, corpus-independent map of
   programming verbs (`evaluate`/`evaluation` → `eval`, `registration` →
   `register`, `routing` → `route`) plus a conservative suffix rule, so a prose
   task can meet the identifiers it names. Raw tokens are always kept, so exact
   matches never regress.
 
-`understand` scores those files with BM25 (`bm25(files_fts, 0, 6, 1)`), normalizes
-the best file to 1, and multiplies each symbol's rank by `1 + 2·score`. The six
-best prior files (score ≥ 0.5, never test/doc) additionally seat their definition
-symbols in the ranking pool, because a ranker can only reorder what the spine
-already contains — and on Rust, whose extractor emits no cross-file `references`,
-the implementing file is otherwise unreachable. Anchors stay purely lexical.
+`understand` scores each file in both views and takes the maximum:
+
+```
+window:  max over the file's windows of bm25(files_windows_fts, 0, 6, 1)
+whole :                             bm25(files_fts, 0, 6, 1)      (pre-window)
+prior  = max(normalize(window), normalize(whole)) ∈ 0..1, best file = 1
+```
+
+BM25 divides every term's contribution by the document's length relative to the
+average, so a 50k-token implementation file was being averaged — and
+length-normalized — away against a 30-line helper that repeated two query words.
+A ~512-token window is about one method plus its neighbours, so the file is
+ranked by the chunk that actually holds the evidence (`promql/engine.go` reaches
+the `eval`/`execEvalStmt` region it never used to). The whole-file view is kept
+in the maximum because it is better when the evidence is *diffuse* — a file that
+says the right thing once per section accumulates over its whole body under one
+document (tokio's `io/poll_evented.rs`), and the maximum is monotone in both, so
+no file that used to be strong can be diluted.
+
+Each symbol's rank is then multiplied by `1 + 2·prior`. The six best prior files
+(score ≥ 0.5, never test/doc) additionally seat their definition symbols in the
+ranking pool, because a ranker can only reorder what the spine already contains —
+and on Rust, whose extractor emits no cross-file `references`, the implementing
+file is otherwise unreachable. Anchors stay purely lexical.
 
 Two guards keep that seating from becoming a dump: the strongest prior file's own
 definitions are reseated as one **same-file coherence** block (top 5 by rank, then

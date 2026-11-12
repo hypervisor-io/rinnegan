@@ -197,8 +197,9 @@ export class Indexer {
       for (const n of st.res.nodes) this.store.insertNode(n);
       for (const e of st.res.edges) this.store.insertEdge(e);
       this.store.setImports(f.path, st.res.imports);
-      // Index-time artifact, not semantic-model state: the file's BODY tokens
-      // give query time a file-level BM25 prior (store.fileRelevance).
+      // Index-time artifact, not semantic-model state: the file's whole-file and
+      // per-window BODY tokens give query time a file-level BM25 prior
+      // (store.fileRelevance) and a per-symbol chunk prior (store.windowScores).
       this.store.setFileTokens(f.path, st.content);
     });
     this.store.setFileMeta(f.path, {
@@ -213,12 +214,12 @@ export class Indexer {
   }
 
   /**
-   * Bring every file's files_fts row up to FILE_FTS_VERSION by re-reading the
-   * file's bytes — a token-only change never needs a reparse. Sorted by path, so
-   * two runs over the same tree do identical work in identical order; a file
-   * whose bytes no longer match its recorded hash is left for `sync`/`index`
-   * (which will reparse it properly). Cheap on later runs: one SELECT per file
-   * that already carries the current version.
+   * Bring every file's token rows (whole-file and per-window) up to
+   * FILE_FTS_VERSION by re-reading the file's bytes — a token-only change never
+   * needs a reparse. Sorted by path, so two runs over the same tree do identical
+   * work in identical order; a file whose bytes no longer match its recorded hash
+   * is left for `sync`/`index` (which will reparse it properly). Cheap on later
+   * runs: one SELECT per file that already carries the current version.
    */
   private backfillFileTokens(root: string): number {
     const stale: { path: string; meta: FileMeta; content: string }[] = [];

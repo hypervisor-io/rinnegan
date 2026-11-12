@@ -59,7 +59,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id UNINDEXED, tokens);
 -- short document that merely repeats the query's words. A file-level BM25 score
 -- is the query-time prior that keeps a lexically-loud but unrelated file from
 -- capturing an entire slice on symbol names alone.
+--
+-- Kept (and still written) as the whole-file row: it is the fallback prior for
+-- a DB whose window rows have not been backfilled yet.
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(file UNINDEXED, path_tokens, tokens);
+
+-- Windowed body index: each file is cut into at most `GraphStore` WINDOW_MAX
+-- chunks of ~WINDOW_TOKENS body tokens (see bodyWindows), and each chunk is one
+-- BM25 document, so a huge implementation file is scored by its BEST chunk
+-- instead of being averaged — and length-normalized — as one long document.
+-- `start_line`/`end_line` are ABSOLUTE 1-based source lines, so a symbol's own
+-- range can join to the chunks it overlaps without reading the file again.
+-- Rows are keyed by the plain table's rowid, which is also the fts rowid:
+-- `file` is UNINDEXED in the fts table, so deletes must key by rowid through
+-- `idx_files_windows_file` instead of scanning the fts table.
+CREATE TABLE IF NOT EXISTS files_windows (
+  id          INTEGER PRIMARY KEY,
+  file        TEXT NOT NULL,
+  start_line  INTEGER NOT NULL,
+  end_line    INTEGER NOT NULL,
+  token_count INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_files_windows_file ON files_windows(file);
+CREATE VIRTUAL TABLE IF NOT EXISTS files_windows_fts USING fts5(file UNINDEXED, path_tokens, tokens);
 
 -- Single-row cache for the semantic (LSA) model, which costs minutes to build on
 -- a large corpus. `fingerprint` is the corpus identity (node count + the same

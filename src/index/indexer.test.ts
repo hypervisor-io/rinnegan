@@ -281,7 +281,8 @@ describe("Indexer", () => {
     // Simulate an index written by the previous token recipe: rows dropped and
     // every file stamped as stale, while the parsed graph stays current.
     const raw = new Database(dbPath);
-    raw.exec("DELETE FROM files_fts; UPDATE files SET fts_version = 0");
+    raw.exec(`DELETE FROM files_fts; DELETE FROM files_windows; DELETE FROM files_windows_fts;
+              UPDATE files SET fts_version = 0`);
     raw.close();
     expect(store.fileRelevance("promql")).toEqual(new Map());
 
@@ -292,6 +293,11 @@ describe("Indexer", () => {
     expect(first.removed).toBe(0);
     expect(store.fileRelevance("promql").get("promql/engine.go")).toBe(1);
     expect(store.fileRelevance("evaluate").has("promql/engine.go")).toBe(true);
+    const after = new Database(dbPath, { readonly: true });
+    expect(after.prepare(`SELECT count(*) c FROM files_windows WHERE file = 'promql/engine.go'`).get())
+      .toEqual({ c: 1 });
+    expect(after.prepare(`SELECT count(*) c FROM files_windows_fts`).get()).toEqual({ c: 2 });
+    after.close();
 
     // Idempotent: the presence stamp means the second run rewrites nothing.
     const second = await ix.sync(root);
