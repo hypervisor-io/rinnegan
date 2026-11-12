@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS files (
   mtime_ms         REAL NOT NULL,
   node_ids         TEXT NOT NULL,
   role             TEXT NOT NULL DEFAULT 'library',
-  analyzer_version INTEGER NOT NULL DEFAULT 0
+  analyzer_version INTEGER NOT NULL DEFAULT 0,
+  fts_version      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS imports (
@@ -51,11 +52,14 @@ CREATE INDEX IF NOT EXISTS idx_imports_file ON imports(file);
 -- so BM25 ranking sees identifier sub-tokens. `id` is carried UNINDEXED.
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id UNINDEXED, tokens);
 
--- FTS5 over the BODY of each indexed file (same pre-tokenized text as nodes_fts,
--- capped deterministically — see GraphStore.setFileTokens). A file-level BM25
--- score is the query-time prior that keeps a lexically-loud but unrelated file
--- from capturing an entire slice on symbol names alone.
-CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(file UNINDEXED, tokens);
+-- FTS5 over the PATH tokens and BODY text of each indexed file, pre-tokenized
+-- like nodes_fts (see GraphStore.setFileTokens). `file` is carried UNINDEXED;
+-- `path_tokens` is the weighted column (GraphStore.fileRelevance passes
+-- bm25(files_fts, 0, 6, 1)), so a file whose PATH names the concept outranks a
+-- short document that merely repeats the query's words. A file-level BM25 score
+-- is the query-time prior that keeps a lexically-loud but unrelated file from
+-- capturing an entire slice on symbol names alone.
+CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(file UNINDEXED, path_tokens, tokens);
 
 -- Single-row cache for the semantic (LSA) model, which costs minutes to build on
 -- a large corpus. `fingerprint` is the corpus identity (node count + the same

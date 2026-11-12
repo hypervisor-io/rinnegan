@@ -32,6 +32,16 @@ import type { LsaState } from "./lsa.js";
  */
 export const SEMANTIC_CACHE_VERSION = 1;
 
+/**
+ * Tokenizer recipe version. The semantic model's vocabulary is produced by
+ * semantic/tokenize.ts (synonyms + identifier morphology); changing that recipe
+ * changes every doc vector and every BM25 token stream, so a persisted model
+ * built by an older recipe must be a MISS, not a subtly-wrong hit. Folded into
+ * the corpus key instead of bumping ANALYZER_VERSION, which would force a full
+ * reparse for a token-only change.
+ */
+export const TOKENIZER_VERSION = 2;
+
 const CONTAINER_MAGIC = "RNGSEM01";
 const LSA_MAGIC = "RNGLSAL1";
 const BM25_MAGIC = "RNGBM251";

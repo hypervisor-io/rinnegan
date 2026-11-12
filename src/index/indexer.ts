@@ -1,7 +1,7 @@
 import { readFileSync, statSync, existsSync } from "node:fs";
 import { join, extname } from "node:path";
 import { availableParallelism } from "node:os";
-import { GraphStore } from "../graph/store.js";
+import { GraphStore, FILE_FTS_VERSION, type FileMeta } from "../graph/store.js";
 import { scanFiles, contentHash, LANG_EXT, type ScannedFile } from "../ingest/scanner.js";
 import { parseFile, ANALYZER_VERSION } from "../parse/extract.js";
 import { resolveImports } from "../resolution/imports.js";
@@ -73,6 +73,8 @@ export class Indexer {
         : await this.indexSerial(root, files, ctx);
     // cross-file pass once all files are present
     this.store.tx(() => resolveImports(this.store));
+    // Token-row recipe upgrades are backfilled from bytes, never by reparsing.
+    this.backfillFileTokens(root);
     const s = this.store.stats();
     return { scanned: files.length, parsed, skipped, nodes: s.nodes, edges: s.edges };
   }
@@ -151,7 +153,10 @@ export class Indexer {
     const content = readFileSync(abs, "utf8");
     const hash = contentHash(content);
     if (meta && fresh && meta.hash === hash) {
-      this.store.setFileMeta(f.path, { hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds, role: meta.role, analyzerVersion: ANALYZER_VERSION });
+      this.store.setFileMeta(f.path, {
+        hash, mtimeMs: st.mtimeMs, nodeIds: meta.nodeIds, role: meta.role,
+        analyzerVersion: ANALYZER_VERSION, ftsVersion: meta.ftsVersion,
+      });
       return { kind: "skipped" }; // gate 2
     }
 
@@ -202,8 +207,41 @@ export class Indexer {
       nodeIds: st.res.nodes.map((n) => n.id),
       role,
       analyzerVersion: ANALYZER_VERSION,
+      ftsVersion: FILE_FTS_VERSION,
     });
     return true;
+  }
+
+  /**
+   * Bring every file's files_fts row up to FILE_FTS_VERSION by re-reading the
+   * file's bytes — a token-only change never needs a reparse. Sorted by path, so
+   * two runs over the same tree do identical work in identical order; a file
+   * whose bytes no longer match its recorded hash is left for `sync`/`index`
+   * (which will reparse it properly). Cheap on later runs: one SELECT per file
+   * that already carries the current version.
+   */
+  private backfillFileTokens(root: string): number {
+    const stale: { path: string; meta: FileMeta; content: string }[] = [];
+    for (const path of this.store.allFilePaths()) {
+      const meta = this.store.getFileMeta(path);
+      if (!meta || meta.ftsVersion === FILE_FTS_VERSION) continue;
+      let content: string;
+      try {
+        content = readFileSync(join(root, path), "utf8");
+      } catch {
+        continue; // gone or unreadable — the next sync removes/reparses it
+      }
+      if (contentHash(content) !== meta.hash) continue; // stale bytes: not ours to index
+      stale.push({ path, meta, content });
+    }
+    if (stale.length === 0) return 0;
+    this.store.tx(() => {
+      for (const s of stale) {
+        this.store.setFileTokens(s.path, s.content);
+        this.store.setFileMeta(s.path, { ...s.meta, ftsVersion: FILE_FTS_VERSION });
+      }
+    });
+    return stale.length;
   }
 
   /**
@@ -223,6 +261,7 @@ export class Indexer {
     let reindexed = 0;
     for (const f of scanned) if (await this.indexOne(root, f, ctx)) reindexed++;
     if (reindexed + removed > 0) this.store.tx(() => resolveImports(this.store));
+    this.backfillFileTokens(root);
     return { reindexed, removed };
   }
 

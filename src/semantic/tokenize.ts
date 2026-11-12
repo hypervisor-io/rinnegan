@@ -1,7 +1,10 @@
 /**
- * Identifier-aware tokenization with a small curated programming-synonym lexicon.
- * Deterministic, no model. Used to build symbol documents for LSA + BM25.
+ * Identifier-aware tokenization with a small curated programming-synonym lexicon
+ * and conservative code-identifier morphology. Deterministic, no model. Used to
+ * build symbol documents for LSA + BM25.
  */
+
+import { compactVariants, expandMorphology } from "./morph.js";
 
 const SYNONYMS: Record<string, string[]> = {
   auth: ["authenticate", "authentication", "login", "signin", "credential"],
@@ -45,7 +48,15 @@ export function expandSynonyms(tokens: string[]): string[] {
   return [...out];
 }
 
-/** Full document tokenization: split + synonym-expand. */
+/**
+ * Full document tokenization: split + synonym-expand + morphology.
+ *
+ * Morphology is what lets a prose task meet its identifiers: a docstring that
+ * says "evaluates the given expression" indexes `eval` as well as `evaluates`,
+ * so the query "how does PromQL evaluate an instant query" can reach the `eval`
+ * symbol. Compound forms keep "PromQL" reachable as the `promql` package token.
+ * The model depends on this recipe, so cache.ts bumps its version with it.
+ */
 export function docTokens(text: string): string[] {
-  return expandSynonyms(splitIdentifier(text));
+  return [...expandMorphology(expandSynonyms(splitIdentifier(text))), ...compactVariants(text)];
 }

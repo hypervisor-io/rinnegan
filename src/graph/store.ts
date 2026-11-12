@@ -7,6 +7,7 @@ import { nodeId } from "../core/types.js";
 import type { GraphNode, GraphEdge, EdgeKind } from "../core/types.js";
 import type { ImportRef } from "../parse/extract.js";
 import { resolveModulePath } from "../resolution/module_path.js";
+import { compactVariants, expandMorphology } from "../semantic/morph.js";
 
 const SCHEMA = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "schema.sql"), "utf8");
 
@@ -27,6 +28,25 @@ const CACHE_SCHEMA = `CREATE TABLE IF NOT EXISTS semantic_cache (
  */
 const FILE_TOKEN_CAP = 4096;
 
+/**
+ * How much more a files_fts PATH token counts than a body token. A path is a
+ * deliberate, low-noise statement of what a file is for ("promql/engine.go",
+ * "action_dispatch/routing/route_set.rb"); a body repeats common words and is
+ * length-normalized by BM25, so a long implementation file loses to a short
+ * document that merely mentions the same words. Weighting the path 6:1 restores
+ * the intent signal. Passed positionally to bm25() in column order
+ * (file UNINDEXED, path_tokens, tokens).
+ */
+const FILE_PATH_WEIGHT = 6;
+
+/**
+ * Version of the files_fts token recipe (path tokens + identifier morphology).
+ * Bumping it makes `index` rebuild every file's token row ONCE from the file's
+ * bytes — no reparse. Stored per file in `files.fts_version` so the backfill is
+ * a cheap presence check on later runs.
+ */
+export const FILE_FTS_VERSION = 1;
+
 export interface FileMeta {
   hash: string;
   mtimeMs: number;
@@ -34,6 +54,8 @@ export interface FileMeta {
   role: string;
   /** ANALYZER_VERSION that produced this file's nodes/edges — see parse/extract.ts. */
   analyzerVersion: number;
+  /** FILE_FTS_VERSION that produced this file's files_fts row. */
+  ftsVersion: number;
 }
 
 export interface OpenOpts {
@@ -50,6 +72,25 @@ export function basicTokens(s: string): string[] {
     .toLowerCase()
     .split(/\s+/)
     .filter((t) => t.length > 1);
+}
+
+/**
+ * Index-time token stream for a short piece of identifier text (a symbol's name
+ * + signature + docstring, or a file path): document order, term frequency
+ * preserved, plus morphological variants and compound ("PromQL" → "promql")
+ * forms. Deterministic — the same text always yields the same stream.
+ */
+function documentTokens(text: string): string[] {
+  return [...expandMorphology(basicTokens(text)), ...compactVariants(text)];
+}
+
+/**
+ * Query-side FTS terms for `text`: the same expansion as the index side, but
+ * deduplicated (a MATCH only needs the distinct terms). Empty when the text has
+ * no usable token, so callers can treat "nothing to match" as a no-op.
+ */
+export function ftsQueryTerms(text: string): string[] {
+  return [...new Set([...expandMorphology(basicTokens(text)), ...compactVariants(text)])];
 }
 
 interface NodeRow {
@@ -87,6 +128,18 @@ export class GraphStore {
     const cols = (this.db.pragma("table_info(files)") as { name: string }[]).map((c) => c.name);
     if (!cols.includes("role")) this.db.exec(`ALTER TABLE files ADD COLUMN role TEXT NOT NULL DEFAULT 'library'`);
     if (!cols.includes("analyzer_version")) this.db.exec(`ALTER TABLE files ADD COLUMN analyzer_version INTEGER NOT NULL DEFAULT 0`);
+    if (!cols.includes("fts_version")) this.db.exec(`ALTER TABLE files ADD COLUMN fts_version INTEGER NOT NULL DEFAULT 0`);
+
+    // files_fts gained the weighted `path_tokens` column. FTS5 tables cannot add
+    // a column, so an older one is dropped and recreated; every file is stamped
+    // as needing its token row rebuilt (fts_version = 0) and Indexer backfills
+    // those rows from the file bytes on the next `index` — no reparse required.
+    const ftsCols = (this.db.pragma("table_info(files_fts)") as { name: string }[]).map((c) => c.name);
+    if (!ftsCols.includes("path_tokens")) {
+      this.db.exec(`DROP TABLE IF EXISTS files_fts`);
+      this.db.exec(`CREATE VIRTUAL TABLE files_fts USING fts5(file UNINDEXED, path_tokens, tokens)`);
+      this.db.exec(`UPDATE files SET fts_version = 0`);
+    }
   }
 
   /** Memoized prepared statement — compile each SQL once, reuse for every call. */
@@ -170,7 +223,7 @@ export class GraphStore {
     ).run(n.id, n.kind, n.qualifiedName, n.filePath, n.language, n.startLine, n.endLine,
       n.signature ?? null, n.docstring ?? null, n.isExported ? 1 : 0);
 
-    const tokens = basicTokens(`${n.qualifiedName} ${n.signature ?? ""} ${n.docstring ?? ""}`).join(" ");
+    const tokens = documentTokens(`${n.qualifiedName} ${n.signature ?? ""} ${n.docstring ?? ""}`).join(" ");
     // Key FTS rows by the node's rowid. `id UNINDEXED` cannot be deleted by key;
     // every such delete would full-scan nodes_fts (quadratic indexing).
     const row = this.stmt(`SELECT rowid AS rid FROM nodes WHERE id = ?`).get(n.id) as { rid: number };
@@ -209,7 +262,7 @@ export class GraphStore {
 
   /** FTS5 BM25 search over pre-tokenized identifier text. Deterministic id tie-break. */
   searchFts(query: string, limit: number): GraphNode[] {
-    const toks = [...new Set(basicTokens(query))];
+    const toks = ftsQueryTerms(query);
     if (toks.length === 0) return [];
     const match = toks.map((t) => `"${t}"`).join(" OR ");
     const rows = this.stmt(
@@ -240,7 +293,7 @@ export class GraphStore {
 
   /** BM25 score per node id for a query (lower bm25 = better; we return -bm25 as score). */
   bm25Scores(query: string, limit: number): { id: string; score: number }[] {
-    const toks = [...new Set(basicTokens(query))];
+    const toks = ftsQueryTerms(query);
     if (toks.length === 0) return [];
     const match = toks.map((t) => `"${t}"`).join(" OR ");
     const rows = this.stmt(
@@ -251,43 +304,48 @@ export class GraphStore {
   }
 
   /**
-   * Store the index-time token text of a file BODY for files_fts. Deterministic:
-   * tokens are basicTokens(content) in file order, capped at FILE_TOKEN_CAP.
-   * An empty body (or one with no usable tokens) drops the row instead of
-   * inserting an empty document, so BM25 never sees a zero-length file.
+   * Store the index-time token text of a file for files_fts. Deterministic:
+   * the PATH is tokenized (weighted, see FILE_PATH_WEIGHT) and the BODY is
+   * `basicTokens(content)` in file order, capped at FILE_TOKEN_CAP, then
+   * morphology-expanded — so "promql/engine.go" carries "promql" from its path
+   * and "evaluate" in a docstring can meet an `eval` identifier in the body.
+   * An empty document (no path and no usable body tokens) drops the row instead
+   * of inserting one, so BM25 never sees a zero-length file.
    *
-   * The table is created by schema.sql with CREATE TABLE IF NOT EXISTS, so a DB
-   * written by an older rinnegan grows it on the next write open; a read-only
-   * connection never gets here (and never writes).
+   * The table is created by schema.sql (or the constructor's migration) with
+   * `path_tokens`; a read-only connection never gets here (and never writes).
    */
   setFileTokens(filePath: string, content: string): void {
     if (this.db.readonly) return;
-    const tokens = basicTokens(content).slice(0, FILE_TOKEN_CAP).join(" ");
+    const pathTokens = [...new Set([...basicTokens(filePath), ...compactVariants(filePath)])].join(" ");
+    const bodyTokens = expandMorphology(basicTokens(content).slice(0, FILE_TOKEN_CAP)).join(" ");
     this.stmt(`DELETE FROM files_fts WHERE file = ?`).run(filePath);
-    if (!tokens) return;
-    this.stmt(`INSERT INTO files_fts (file, tokens) VALUES (?, ?)`).run(filePath, tokens);
+    if (!pathTokens && !bodyTokens) return;
+    this.stmt(`INSERT INTO files_fts (file, path_tokens, tokens) VALUES (?, ?, ?)`).run(filePath, pathTokens, bodyTokens);
   }
 
   /**
-   * File-level relevance prior: FTS5 BM25 over the file BODY text, converted to
-   * a positive score (bm25 is more-negative-is-better) and normalized against
-   * the best file in the pool, so the top file is 1 and the rest sit in 0..1.
-   * Deterministic: `bm25, file` ordering means ties are broken by path.
-   * Returns an empty map when the table is absent (DB predating files_fts) —
-   * a missing prior must be a no-op, never a failed query.
+   * File-level relevance prior: FTS5 BM25 over the file's PATH tokens (weighted
+   * FILE_PATH_WEIGHT) and BODY tokens, converted to a positive score (bm25 is
+   * more-negative-is-better) and normalized against the best file in the pool,
+   * so the top file is 1 and the rest sit in 0..1. Deterministic: `bm25, file`
+   * ordering means ties are broken by path.
+   * Returns an empty map when the table is absent (DB predating files_fts) or
+   * predates the path column — a missing prior must be a no-op, never a failed
+   * query.
    */
   fileRelevance(query: string, limit = 200): Map<string, number> {
-    const toks = [...new Set(basicTokens(query))];
+    const toks = ftsQueryTerms(query);
     if (toks.length === 0) return new Map();
     const match = toks.map((t) => `"${t}"`).join(" OR ");
     let rows: { file: string; b: number }[];
     try {
       rows = this.stmt(
-        `SELECT file, bm25(files_fts) AS b FROM files_fts
-         WHERE tokens MATCH ? ORDER BY b, file LIMIT ?`,
+        `SELECT file, bm25(files_fts, 0.0, ${FILE_PATH_WEIGHT}, 1.0) AS b FROM files_fts
+         WHERE files_fts MATCH ? ORDER BY b, file LIMIT ?`,
       ).all(match, limit) as { file: string; b: number }[];
     } catch {
-      return new Map(); // no files_fts table (pre-prior DB) — no prior available
+      return new Map(); // no files_fts / no path_tokens column (old DB) — no prior available
     }
     const scored = rows.map((r) => ({ file: r.file, score: -r.b }));
     let max = 0;
@@ -347,14 +405,24 @@ export class GraphStore {
 
   getFileMeta(path: string): FileMeta | undefined {
     const r = this.stmt(`SELECT * FROM files WHERE path = ?`).get(path) as
-      | { path: string; hash: string; mtime_ms: number; node_ids: string; role: string | null; analyzer_version: number } | undefined;
-    return r ? { hash: r.hash, mtimeMs: r.mtime_ms, nodeIds: JSON.parse(r.node_ids), role: r.role ?? "library", analyzerVersion: r.analyzer_version } : undefined;
+      | { path: string; hash: string; mtime_ms: number; node_ids: string; role: string | null; analyzer_version: number; fts_version: number }
+      | undefined;
+    return r
+      ? {
+          hash: r.hash,
+          mtimeMs: r.mtime_ms,
+          nodeIds: JSON.parse(r.node_ids),
+          role: r.role ?? "library",
+          analyzerVersion: r.analyzer_version,
+          ftsVersion: r.fts_version ?? 0,
+        }
+      : undefined;
   }
 
   setFileMeta(path: string, meta: FileMeta): void {
     this.stmt(
-      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids,role,analyzer_version) VALUES (?,?,?,?,?,?)`,
-    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds), meta.role, meta.analyzerVersion);
+      `INSERT OR REPLACE INTO files (path,hash,mtime_ms,node_ids,role,analyzer_version,fts_version) VALUES (?,?,?,?,?,?,?)`,
+    ).run(path, meta.hash, meta.mtimeMs, JSON.stringify(meta.nodeIds), meta.role, meta.analyzerVersion, meta.ftsVersion);
   }
 
   /** Role per indexed file path, sorted by path. */

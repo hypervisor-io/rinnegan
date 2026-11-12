@@ -2,7 +2,7 @@ import { GraphStore, basicTokens } from "../graph/store.js";
 import { LsaIndex, type Scored, type SymbolDoc } from "./lsa.js";
 import { Bm25Index } from "./bm25.js";
 import { rrfFuse } from "./fuse.js";
-import { deserializeModel, serializeModel } from "./cache.js";
+import { deserializeModel, serializeModel, TOKENIZER_VERSION } from "./cache.js";
 
 /** Kinds that carry no retrievable meaning — excluded from the semantic model. */
 const NON_SEMANTIC_KINDS = new Set(["file", "unresolved", "import"]);
@@ -23,14 +23,15 @@ function symbolDocs(store: GraphStore): SymbolDoc[] {
 }
 
 /**
- * Corpus identity for the semantic cache: the store's content fingerprint (file
- * path + hash + analyzer version — the value `rinnegan status` prints) plus the
- * node count, so a graph mutation that does not come from a file re-index (a
- * direct insertNode, a migration) also invalidates the model.
+ * Corpus identity for the semantic cache: the tokenizer recipe version, the
+ * store's content fingerprint (file path + hash + analyzer version — the value
+ * `rinnegan status` prints) plus the node count, so a graph mutation that does
+ * not come from a file re-index (a direct insertNode, a migration) also
+ * invalidates the model.
  */
 export function semanticCacheKey(store: GraphStore): string {
   const { nodes } = store.stats();
-  return `${nodes}:${store.fingerprint()}`;
+  return `${TOKENIZER_VERSION}:${nodes}:${store.fingerprint()}`;
 }
 
 /**

@@ -116,19 +116,67 @@ describe("GraphStore", () => {
   });
 });
 
-describe("GraphStore files_fts (file-body prior)", () => {
+describe("GraphStore files_fts (path-aware file prior)", () => {
   it("scores the file whose BODY holds the rare token, normalized to 0..1", () => {
     const g = GraphStore.open(":memory:");
     g.setFileTokens("runtime/io/driver.rs", "the epoll driver turns io resources");
     g.setFileTokens("logging/admin.ts", "logging admin filters request context");
     const rel = g.fileRelevance("epoll io");
     expect(rel.get("runtime/io/driver.rs")).toBe(1); // best file normalizes to exactly 1
-    expect(rel.has("logging/admin.ts")).toBe(false); // no body hit ⇒ absent, not a low score
+    expect(rel.has("logging/admin.ts")).toBe(false); // no path or body hit ⇒ absent
     for (const v of rel.values()) {
       expect(v).toBeGreaterThan(0);
       expect(v).toBeLessThanOrEqual(1);
     }
     expect(g.fileRelevance("nothingmatcheshere")).toEqual(new Map());
+    g.close();
+  });
+
+  it("weights PATH tokens above body tokens, so naming the concept in the path wins", () => {
+    const g = GraphStore.open(":memory:");
+    // Identical bodies that say nothing about promql: only the PATH knows.
+    g.setFileTokens("promql/engine.go", "the evaluator walks the statement tree");
+    g.setFileTokens("docs/notes.md", "the evaluator walks the statement tree");
+    expect(g.fileRelevance("promql").get("promql/engine.go")).toBe(1);
+    expect(g.fileRelevance("promql").has("docs/notes.md")).toBe(false);
+    // A directory component counts the same as a basename component.
+    expect(g.fileRelevance("engine").get("promql/engine.go")).toBe(1);
+
+    // Same single occurrence in the path vs in the body: the path wins.
+    const h = GraphStore.open(":memory:");
+    h.setFileTokens("promql/engine.go", "walks the expression tree");
+    h.setFileTokens("misc/helper.go", "promql walks the expression tree");
+    const pathWins = h.fileRelevance("promql");
+    expect(pathWins.get("promql/engine.go")).toBe(1);
+    expect(pathWins.get("misc/helper.go")).toBeLessThan(1);
+    g.close();
+    h.close();
+  });
+
+  it("indexes identifier MORPHOLOGY so prose verbs meet their identifiers", () => {
+    const g = GraphStore.open(":memory:");
+    g.insertNode({ id: "n_eval", kind: "method", qualifiedName: "eval", filePath: "promql/engine.go", language: "go", startLine: 2669, endLine: 2680 });
+    g.insertNode({ id: "n_register", kind: "function", qualifiedName: "register", filePath: "router/registry.ts", language: "ts", startLine: 3, endLine: 5 });
+    g.insertNode({ id: "n_cat", kind: "function", qualifiedName: "catalog", filePath: "shop/catalog.ts", language: "ts", startLine: 1, endLine: 2 });
+
+    // prose → identifier (and back) must both hit
+    expect(g.searchFts("evaluate", 5).map((n) => n.id)).toContain("n_eval");
+    expect(g.searchFts("evaluation", 5).map((n) => n.id)).toContain("n_eval");
+    expect(g.searchFts("registration", 5).map((n) => n.id)).toContain("n_register");
+    expect(g.searchFts("registering", 5).map((n) => n.id)).toContain("n_register");
+    // unrelated words stay unrelated
+    expect(g.searchFts("cat", 5)).toEqual([]);
+    expect(g.searchFts("evaluate", 5).map((n) => n.id)).not.toContain("n_cat");
+    g.close();
+  });
+
+  it("applies the same morphology to file bodies (both directions)", () => {
+    const g = GraphStore.open(":memory:");
+    g.setFileTokens("a/engine.go", "eval eval eval the statement");
+    g.setFileTokens("b/registry.ts", "registration handled here");
+    expect(g.fileRelevance("evaluate").get("a/engine.go")).toBe(1);
+    expect(g.fileRelevance("register").get("b/registry.ts")).toBe(1);
+    expect(g.fileRelevance("cat")).toEqual(new Map());
     g.close();
   });
 
@@ -169,6 +217,35 @@ describe("GraphStore files_fts (file-body prior)", () => {
     expect(ro.fileRelevance("epoll")).toEqual(new Map()); // missing table is a no-op, not a throw
     expect(() => ro.setFileTokens("a.ts", "epoll")).not.toThrow(); // silently skipped
     ro.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("migrates a pre-path files_fts by recreating it and stamping files for backfill", () => {
+    const dir = mkdtempSync(join(tmpdir(), "rinnegan-fts-mig-"));
+    const dbPath = join(dir, "graph.db");
+    // A database written by the previous version: old files_fts (no path_tokens)
+    // and a `files` row that has no fts_version stamp.
+    const legacy = new Database(dbPath);
+    legacy.exec(`
+      CREATE TABLE files (path TEXT PRIMARY KEY, hash TEXT NOT NULL, mtime_ms REAL NOT NULL,
+                          node_ids TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'library',
+                          analyzer_version INTEGER NOT NULL DEFAULT 0);
+      CREATE VIRTUAL TABLE files_fts USING fts5(file UNINDEXED, tokens);
+      INSERT INTO files (path, hash, mtime_ms, node_ids, role, analyzer_version)
+        VALUES ('a.ts', 'h', 1, '[]', 'library', 1);
+      INSERT INTO files_fts (file, tokens) VALUES ('a.ts', 'legacy body tokens');
+    `);
+    legacy.close();
+
+    const g = GraphStore.open(dbPath);
+    // Rewriting rows is required: the old token row is gone and the file is
+    // stamped so `index` knows to backfill it exactly once.
+    expect(g.fileRelevance("legacy")).toEqual(new Map());
+    expect(g.getFileMeta("a.ts")!.ftsVersion).toBe(0);
+    // The new writer stores path tokens, so the very next write is path-aware.
+    g.setFileTokens("promql/engine.go", "eval");
+    expect(g.fileRelevance("promql").get("promql/engine.go")).toBe(1);
+    g.close();
     rmSync(dir, { recursive: true, force: true });
   });
 });

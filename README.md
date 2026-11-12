@@ -167,24 +167,54 @@ model. The SVD is the only expensive step in the pipeline — minutes on a large
 | 22k nodes | 21 s | 1.3 s |
 
 The cache key is the corpus fingerprint (the same value `status` prints) plus the
-node count, so any index mutation invalidates it — a stale model is never served. The
+node count and the tokenizer recipe version, so any index mutation — or any change
+to how documents are tokenized — invalidates it; a stale model is never served. The
 payload is a versioned, little-endian binary blob (bump `SEMANTIC_CACHE_VERSION` in
 `src/semantic/cache.ts` to invalidate every existing row), and loading it reproduces
 the built model bit for bit, so answers are identical either way. On a read-only
 `graph.db` queries still work; they just rebuild instead of caching.
 
-### File-body BM25 prior (retrieval)
+### Path-aware file prior + identifier morphology (retrieval)
 
 Symbol text alone is captured by lexically-loud files: a query about "driving IO
 with epoll" finds `benches/*.rs` and test helpers before `runtime/io/driver.rs`,
 because only symbol names are indexed. `index` therefore also writes each file's
-BODY tokens to `files_fts` (deterministic: `basicTokens` in file order, capped at
-4096 tokens per file). `understand` scores those bodies with BM25, normalizes the
-best file to 1, and multiplies each symbol's rank by `1 + 2·score`. The three best
-prior files (score ≥ 0.5, never test/doc) additionally seat their definition
+PATH and BODY tokens to `files_fts`:
+
+- **path tokens** (`path_tokens`, weighted 6:1 over the body) — a path is a
+  deliberate, low-noise statement of what a file is for (`promql/engine.go`,
+  `action_dispatch/routing/route_set.rb`). Without them a short README that
+  repeats the query's words outranks the file that implements the concept because
+  BM25 length-normalizes long documents down.
+- **body tokens** (`tokens`, deterministic `basicTokens` in file order, capped at
+  4096 tokens per file).
+- **identifier morphology** on both sides: a small, corpus-independent map of
+  programming verbs (`evaluate`/`evaluation` → `eval`, `registration` →
+  `register`, `routing` → `route`) plus a conservative suffix rule, so a prose
+  task can meet the identifiers it names. Raw tokens are always kept, so exact
+  matches never regress.
+
+`understand` scores those files with BM25 (`bm25(files_fts, 0, 6, 1)`), normalizes
+the best file to 1, and multiplies each symbol's rank by `1 + 2·score`. The six
+best prior files (score ≥ 0.5, never test/doc) additionally seat their definition
 symbols in the ranking pool, because a ranker can only reorder what the spine
 already contains — and on Rust, whose extractor emits no cross-file `references`,
 the implementing file is otherwise unreachable. Anchors stay purely lexical.
+
+Two guards keep that seating from becoming a dump: the strongest prior file's own
+definitions are reseated as one **same-file coherence** block (top 5 by rank, then
+source order), and DETAIL renders at most five facts per file so one long file
+cannot spend the whole specificity budget.
+
+**Upgrading an existing index.** `files.fts_version` records the token recipe that
+produced each file's row. A database written before path tokens existed is
+migrated automatically on the next write open (the FTS table is recreated and every
+file is stamped stale), and the next plain `rinnegan index` rebuilds those rows
+from the file bytes — no reparse, no `ANALYZER_VERSION` bump, and later runs are a
+cheap per-file presence check. The semantic model's cache key includes the
+tokenizer recipe version, so a model built by the old recipe is a miss, not a
+subtly-wrong hit. Querying an old `graph.db` read-only still works: a missing
+prior is a no-op, never a failure.
 
 ## Pre-commit gate
 

@@ -32,6 +32,15 @@ export interface Balance {
 
 export const DEFAULT_BALANCE: Balance = { map: 0.15, signatures: 0.25, detail: 0.6 };
 
+/**
+ * DETAIL facts allowed per FILE. The budget is spent best-first, so without a
+ * cap the first one or two files can consume the whole specificity tier with
+ * long definitions (measured: five ~50-line CLI helpers starved the query
+ * engine that the task named). A cap keeps the slice answering "how does this
+ * work" across the spine instead of dumping one file.
+ */
+const DETAIL_PER_FILE = 5;
+
 export interface HarmonicResult {
   text: string;
   facts: RenderedFact[];
@@ -94,8 +103,11 @@ export function buildHarmonic(
 
   // --- DETAIL: full bodies of the most relevant, position-ordered (specificity) ---
   const facts: RenderedFact[] = [];
+  const perFile = new Map<string, number>();
   let detailUsed = 0;
   for (const r of meaningful) {
+    const used = perFile.get(r.node.filePath) ?? 0;
+    if (used >= DETAIL_PER_FILE) continue; // budget goes to the spine, not one file
     const fact = renderFact(store, r, readSource(r.node.filePath), { skeleton: false });
     if (opts.roles && DEF_KINDS.has(r.node.kind)) {
       fact.body += `\n  covered-by: ${coveredBy(store, r.node, opts.roles)}`;
@@ -103,6 +115,7 @@ export function buildHarmonic(
     const c = estimateTokens(fact.body);
     if (detailUsed + c > detailBudget && facts.length > 0) break;
     facts.push(fact);
+    perFile.set(r.node.filePath, used + 1);
     detailUsed += c;
   }
   const ordered = positionOrder(facts);

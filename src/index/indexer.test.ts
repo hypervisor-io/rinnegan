@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import Database from "better-sqlite3";
 import { GraphStore } from "../graph/store.js";
 import { Indexer, defaultJobs, resolveJobs } from "./indexer.js";
+import { FILE_FTS_VERSION } from "../graph/store.js";
 import type { GraphEdge, GraphNode } from "../core/types.js";
 
 let root: string;
@@ -260,7 +261,44 @@ describe("Indexer", () => {
     expect((await ix.sync(root)).reindexed).toBe(0);
     const raw = new Database(dbPath);
     expect(raw.prepare("SELECT count(*) c FROM files_fts WHERE file = ?").get("a.ts")).toEqual({ c: 1 });
+    // The row carries the PATH tokens too, so path-aware scoring works on it.
+    expect(raw.prepare("SELECT count(*) c FROM files_fts WHERE file = ? AND path_tokens LIKE ?").get("a.ts", "%ts%"))
+      .toEqual({ c: 1 });
     raw.close();
+    store.close();
+  });
+
+  it("backfills stale file-token rows from bytes once, without reparsing anything", async () => {
+    const root = fixture({
+      "promql/engine.go": "package promql\nfunc eval() { evaluate() }\n",
+      "cmd/tool/main.go": "package main\nfunc main() { }\n",
+    });
+    const dbPath = join(root, ".rinnegan", "graph.db");
+    const store = GraphStore.open(dbPath);
+    const ix = new Indexer(store);
+    await ix.indexAll(root, { jobs: 1 });
+
+    // Simulate an index written by the previous token recipe: rows dropped and
+    // every file stamped as stale, while the parsed graph stays current.
+    const raw = new Database(dbPath);
+    raw.exec("DELETE FROM files_fts; UPDATE files SET fts_version = 0");
+    raw.close();
+    expect(store.fileRelevance("promql")).toEqual(new Map());
+
+    // A plain sync (no `index --rebuild-prior`, no analyzer-version bump)
+    // restores the rows from the files' bytes: nothing is reparsed.
+    const first = await ix.sync(root);
+    expect(first.reindexed).toBe(0);
+    expect(first.removed).toBe(0);
+    expect(store.fileRelevance("promql").get("promql/engine.go")).toBe(1);
+    expect(store.fileRelevance("evaluate").has("promql/engine.go")).toBe(true);
+
+    // Idempotent: the presence stamp means the second run rewrites nothing.
+    const second = await ix.sync(root);
+    expect(second.reindexed).toBe(0);
+    expect(store.fileRelevance("promql").get("promql/engine.go")).toBe(1);
+    const meta = store.getFileMeta("promql/engine.go")!;
+    expect(meta.ftsVersion).toBe(FILE_FTS_VERSION);
     store.close();
   });
 

@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { GraphStore } from "../graph/store.js";
 import { Indexer } from "../index/indexer.js";
 import { SemanticEngine } from "../semantic/engine.js";
-import { understand } from "./understand.js";
+import { understand, sameFileCoherence } from "./understand.js";
 import { minifyBlock } from "./render.js";
 import { rankNodes } from "./rank.js";
 import { Rinnegan } from "../index.js";
@@ -367,13 +367,17 @@ describe("file-body BM25 prior (files_fts)", () => {
 
     const prior = store.fileRelevance("how does the runtime drive io resources with epoll");
     expect(prior.get("runtime/io/driver.rs")).toBe(1);
-    expect(prior.get("runtime/sched/queue.rs") ?? 0).toBe(0);
+    // The PATH is part of the prior now, so the sibling file matches one word
+    // ("runtime") and is not a strict zero — but it stays well below the
+    // seating threshold and far behind the file whose path and body both fit.
+    const queuePrior = prior.get("runtime/sched/queue.rs") ?? 0;
+    expect(queuePrior).toBeLessThan(0.5);
 
     const withPrior = rankNodes(store, ids, relevance, { fileRelevance: prior });
     const byId = (r: typeof withPrior) => new Map(r.map((x) => [x.node.id, x.score]));
     expect(byId(withPrior).get(driver.id)!).toBeGreaterThan(byId(withPrior).get(queue.id)!);
-    // (1 + 2·1) vs (1 + 2·0): the top file's symbol triples, the unmatched one is untouched.
-    expect(byId(withPrior).get(driver.id)! / byId(withPrior).get(queue.id)!).toBeCloseTo(3, 10);
+    // (1 + 2·1) vs (1 + 2·q) — the better file's symbol gets the full prior weight.
+    expect(byId(withPrior).get(driver.id)! / byId(withPrior).get(queue.id)!).toBeCloseTo(3 / (1 + 2 * queuePrior), 10);
 
     // No prior supplied ⇒ old math, identical scores and input order preserved.
     const without = rankNodes(store, ids, relevance);
@@ -414,6 +418,97 @@ describe("file-body BM25 prior (files_fts)", () => {
     expect(anchorFiles).toContain("runtime/api.rs");
     expect(anchorFiles).not.toContain("runtime/io/driver.rs"); // prior never seeds
     expect(res.text).toContain("runtime/io/driver.rs:2"); // …but it does re-seat ranking
+    store.close();
+  });
+});
+
+describe("same-file coherence (prior file's own definitions get a block)", () => {
+  afterAll(() => {
+    for (const d of fixtureDirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  /** A Ranked[] built by hand, so the block order is asserted without a ranker. */
+  const ranked = (nodes: { id: string; file: string; line: number; score: number }[]) => {
+    return nodes.map((n) => ({
+      node: {
+        id: n.id, kind: "function" as const, qualifiedName: n.id, filePath: n.file,
+        language: "rs", startLine: n.line, endLine: n.line + 1,
+      },
+      score: n.score, relevance: 0, centrality: 0, trust: 1,
+    }));
+  };
+
+  it("reseats a prior file's best definitions by rank then source order", () => {
+    // Ids are hashes in practice, so their lexical order is arbitrary — here it
+    // deliberately disagrees with source order, which is the case that starved
+    // tokio's `Driver::new`.
+    const list = ranked([
+      { id: "zzz_other", file: "other.rs", line: 1, score: 9 },
+      { id: "zzz_b", file: "driver.rs", line: 40, score: 3 },
+      { id: "aaa_d", file: "driver.rs", line: 70, score: 3 },
+      { id: "zzz_c", file: "driver.rs", line: 55, score: 3 },
+      { id: "yyy_a", file: "driver.rs", line: 10, score: 3 },
+      { id: "xxx_e", file: "driver.rs", line: 90, score: 3 },
+      { id: "www_f", file: "driver.rs", line: 120, score: 3 },
+    ]);
+    const out = sameFileCoherence(list, ["driver.rs"], new Set(["function"]));
+    const names = out.map((r) => r.node.id);
+    // The file's first ranked symbol keeps its global position …
+    expect(names[0]).toBe("zzz_other");
+    expect(names[1]).toBe("zzz_b");
+    // … and the block follows in source order, capped at five definitions.
+    expect(names.slice(2, 6)).toEqual(["yyy_a", "zzz_c", "aaa_d", "xxx_e"]);
+    expect(names.indexOf("www_f")).toBeGreaterThanOrEqual(6); // capped out of the block
+    expect(names).toHaveLength(list.length); // nothing is dropped, only reordered
+    expect(new Set(names).size).toBe(list.length);
+  });
+
+  it("is a no-op without prior files and never duplicates a symbol", () => {
+    const list = ranked([
+      { id: "a", file: "x.rs", line: 1, score: 2 },
+      { id: "b", file: "x.rs", line: 2, score: 2 },
+    ]);
+    expect(sameFileCoherence(list, [], new Set(["function"]))).toEqual(list);
+    const once = sameFileCoherence(list, ["x.rs"], new Set(["function"]));
+    expect(once.map((r) => r.node.id)).toEqual(["a", "b"]);
+  });
+
+  it("puts a prior file's low-ranked entry symbol into the rendered slice", async () => {
+    // Nine tied definitions: without the block, which five reach DETAIL is
+    // decided by node-id order. The block makes the file's source order win.
+    const helpers = [...Array(9)].map((_, i) => `pub fn helper_${i}() -> u32 { ${i} }`);
+    const root = fixture({
+      "runtime/io/driver.rs": [
+        "// the epoll driver turns io readiness into events",
+        "pub fn new(nevents: usize) -> u32 { nevents as u32 }",
+        ...helpers,
+      ].join("\n"),
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    const res = understand(store, semantic, "epoll io readiness driver", { root, tokenBudget: 2000 });
+    expect(res.facts.map((f) => f.qualifiedName)).toContain("new");
+    store.close();
+  });
+
+  it("is byte-deterministic across two runs", async () => {
+    const root = fixture({
+      "runtime/io/driver.rs": [
+        "// epoll driver",
+        "pub fn new() -> u32 { 1 }",
+        "pub fn turn() -> u32 { 2 }",
+        "pub fn park() -> u32 { 3 }",
+      ].join("\n"),
+      "runtime/io/poll.rs": ["// poll readiness", "pub fn poll() -> u32 { 4 }"].join("\n"),
+    });
+    const store = GraphStore.open(":memory:");
+    await new Indexer(store).indexAll(root);
+    const semantic = SemanticEngine.build(store);
+    const a = understand(store, semantic, "epoll io readiness driver", { root, tokenBudget: 2000 });
+    const b = understand(store, semantic, "epoll io readiness driver", { root, tokenBudget: 2000 });
+    expect(b.text).toBe(a.text);
+    expect(b.facts.map((f) => f.id)).toEqual(a.facts.map((f) => f.id));
     store.close();
   });
 });
